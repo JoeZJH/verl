@@ -83,10 +83,10 @@ def run_ppo(config, task_runner_class) -> None:
         nsight_options = OmegaConf.to_container(
             config.global_profiler.global_tool_config.nsys.controller_nsight_options
         )
-        runner = task_runner_class.options(runtime_env={"nsight": nsight_options}).remote()
+        runner = task_runner_class.options(runtime_env={"nsight": nsight_options}).remote() # J: 初始化 Ray Actor 类（通过环境配置带上 NVIDIA GPU 官方扩展库）
     else:
-        runner = task_runner_class.remote()
-    ray.get(runner.run.remote(config))
+        runner = task_runner_class.remote() # J: 初始化 Ray Actor 类
+    ray.get(runner.run.remote(config)) # J: 执行 run 函数并等待结束，核心训练入口
 
     # [Optional] get the path of the timeline trace file from the configuration, default to None
     # This file is used for performance analysis
