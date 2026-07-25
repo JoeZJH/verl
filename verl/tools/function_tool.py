@@ -42,7 +42,7 @@ _LOADED_FUNCTION_TOOL_PATHS: dict[str, list[FunctionTool]] = {}
 
 
 @dataclass
-class FunctionTool:
+class FunctionTool: # J：函数工具对象，用于存储函数工具的元数据和调用逻辑，同时定义了 call 方法
     """Carrier object stored in :data:`FUNCTION_TOOL_REGISTRY`.
 
     Exposes the minimal interface that the agent loop relies on:
@@ -53,19 +53,23 @@ class FunctionTool:
     """
 
     name: str
-    fn: Callable[..., Any]
+    fn: Callable[..., Any] # J：底层函数工具对象，可调用的函数
     tool_schema: OpenAIFunctionToolSchema
-    is_async: bool = False
+    is_async: bool = False # J：是否为协程
 
-    async def call(self, parameters: dict[str, Any]) -> Any:
+    async def call(self, parameters: dict[str, Any]) -> Any: # J：调用函数工具，根据 is_async 参数选择不同的调用方式
         """Invoke the underlying function with the LLM-supplied parameters."""
-        if self.is_async:
-            return await self.fn(**parameters)
-        return await asyncio.to_thread(self.fn, **parameters)
+        if self.is_async: # J：如果是 is_async=True（即 fn 是协程函数），使用协程方式调用函数
+            return await self.fn(**parameters) # J：调用协程函数
+        return await asyncio.to_thread(self.fn, **parameters) # J：否则 fn 为普通函数，此时使用多线程调用普通函数
 
-
-def function_tool(
-    name: Optional[str | Callable] = None,
+# J：注册函数工具的装饰器函数
+# J：在 Python 中，装饰器有两种常见写法：
+# J:    不带括号：@function_tool （此时 function_tool 直接接收被装饰的函数作为第一个参数）
+# J:    带括号：@function_tool("custom_name") （此时 function_tool 先执行，返回一个真正的装饰器，然后再接收被装饰的函数）
+# J: 
+def function_tool( 
+    name: Optional[str | Callable] = None, # J：工具名称，或函数对象本身
     *,
     schema: Optional[OpenAIFunctionToolSchema | dict] = None,
 ):
@@ -101,8 +105,8 @@ def function_tool(
     """
 
     def _make_decorator(tool_name_override: Optional[str]):
-        def decorator(fn: Callable):
-            tool_name = tool_name_override or fn.__name__
+        def decorator(fn: Callable): # J：装饰器函数，用于注册函数工具
+            tool_name = tool_name_override or fn.__name__ # J：根据 tool_name_override 或 fn.__name__ 确定工具名称
 
             if isinstance(schema, OpenAIFunctionToolSchema):
                 built_schema = schema
@@ -111,34 +115,34 @@ def function_tool(
             else:
                 built_schema = _build_schema_from_fn(fn, tool_name)
 
-            entry = FunctionTool(
-                name=tool_name,
-                fn=fn,
-                tool_schema=built_schema,
-                is_async=inspect.iscoroutinefunction(fn),
+            entry = FunctionTool( # J：创建函数工具对象
+                name=tool_name, # J：工具名称
+                fn=fn, # J：底层函数工具对象，可调用的函数
+                tool_schema=built_schema, # J：函数工具的 OpenAI 的工具模式（Pydantic 模型）
+                is_async=inspect.iscoroutinefunction(fn), # J：fn 是否为协程函数的标志位
             )
 
             existing = FUNCTION_TOOL_REGISTRY.get(tool_name)
-            if existing is not None and existing.fn is not fn:
+            if existing is not None and existing.fn is not fn: # J：如果已注册过该函数工具，且不是当前函数，抛出异常
                 raise ValueError(
                     f"Function tool '{tool_name}' is already registered to "
                     f"{existing.fn.__module__}.{existing.fn.__qualname__}; "
                     f"refusing to overwrite with {fn.__module__}.{fn.__qualname__}."
                 )
-            FUNCTION_TOOL_REGISTRY[tool_name] = entry
+            FUNCTION_TOOL_REGISTRY[tool_name] = entry # J：注册函数工具
             logger.info("Registered function tool '%s' from %s.%s", tool_name, fn.__module__, fn.__qualname__)
-            return fn
+            return fn # J：返回底层函数工具对象本身
 
         return decorator
+    # if callable(name) and schema is None: 用来处理装饰器的两种写法（不带括号和带括号）的差异
+    if callable(name) and schema is None: # J： name 是函数对象，且未指定 schema
+        fn = name # J：将 name 赋值给 fn，作为函数工具对象的底层函数
+        return _make_decorator(None)(fn) # J：_make_decorator(None)(fn) 返回底层函数工具对象本身，会默认使用 fn.__name__ 作为工具名称，其中_make_decorator(None)返回 decorator 函数
 
-    if callable(name) and schema is None:
-        fn = name
-        return _make_decorator(None)(fn)
-
-    return _make_decorator(name)
+    return _make_decorator(name) # J：返回装饰器，用于注册函数工具
 
 
-def get_function_tool(name: str) -> FunctionTool:
+def get_function_tool(name: str) -> FunctionTool: # J：根据名称获取已注册的函数工具，如果未注册则抛出异常
     """Look up a registered function tool by name. Raises ``KeyError`` if absent."""
     if name not in FUNCTION_TOOL_REGISTRY:
         raise KeyError(
@@ -148,28 +152,29 @@ def get_function_tool(name: str) -> FunctionTool:
     return FUNCTION_TOOL_REGISTRY[name]
 
 
-def load_function_tools_from_path(path: str) -> list[FunctionTool]:
+def load_function_tools_from_path(path: str) -> list[FunctionTool]: # J：从 python 文件加载函数工具，通过 @function_tool 装饰器注册的函数工具
     """Execute a Python file at ``path`` and return its registered function tools."""
-    abs_path = os.path.abspath(path)
+    abs_path = os.path.abspath(path) # J：获取绝对路径
     if not os.path.isfile(abs_path):
         raise FileNotFoundError(f"function_tool_path does not exist: {path}")
 
-    if abs_path in _LOADED_FUNCTION_TOOL_PATHS:
+    if abs_path in _LOADED_FUNCTION_TOOL_PATHS: # J：如果已加载过该路径的函数工具，直接返回已加载的函数工具
         return _LOADED_FUNCTION_TOOL_PATHS[abs_path]
 
-    before = set(FUNCTION_TOOL_REGISTRY)
+    before = set(FUNCTION_TOOL_REGISTRY) # J：获取当前已注册的函数工具名称
 
     # Use a path-derived synthetic module name so the imported file can
     # ``from X import Y`` its siblings via ``sys.modules``.
+    # J：从路径派生的合成模块名称，用于导入文件可以 ``from X import Y`` 其兄弟模块
     module_name = "_verl_function_tools_" + abs_path.replace(os.sep, "_").replace(".", "_")
     spec = importlib.util.spec_from_file_location(module_name, abs_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot create import spec for function_tool_path: {path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
-    spec.loader.exec_module(module)
+    spec.loader.exec_module(module) # J：执行函数工具模块，注册函数工具
 
-    new_names = sorted(set(FUNCTION_TOOL_REGISTRY) - before)
+    new_names = sorted(set(FUNCTION_TOOL_REGISTRY) - before) # J：获取新注册的函数工具名称
     if not new_names:
         logger.warning(
             "function_tool_path '%s' loaded but no @function_tool decorators found; "
@@ -179,9 +184,9 @@ def load_function_tools_from_path(path: str) -> list[FunctionTool]:
     else:
         logger.info("Loaded %d function tool(s) from %s: %s", len(new_names), path, new_names)
 
-    tools = [FUNCTION_TOOL_REGISTRY[name] for name in new_names]
-    _LOADED_FUNCTION_TOOL_PATHS[abs_path] = tools
-    return tools
+    tools = [FUNCTION_TOOL_REGISTRY[name] for name in new_names] # J：获取新注册的函数工具
+    _LOADED_FUNCTION_TOOL_PATHS[abs_path] = tools # J：缓存已加载的函数工具
+    return tools # J：返回新注册的函数工具（注意：仅返回新注册的函数工具，之前已注册的函数工具不会被返回）
 
 
 def _build_schema_from_fn(fn: Callable, tool_name: str) -> OpenAIFunctionToolSchema:

@@ -21,8 +21,9 @@ from verl.single_controller.base import Worker
 from verl.trainer.distillation import is_distillation_enabled
 from verl.trainer.ppo.core_algos import AdvantageEstimator
 
-WorkerType = type[Worker]
-
+WorkerType = type[Worker] # J：定义一个类型别名，用于表示 “Worker 类本身或其任何子类的类型”，而不是 Worker 的实例类型
+# J：worker: Worker：要求传入一个 Worker 的实例对象（即 Worker() 产生的那个东西）
+# J：worker_class: WorkerType（即 type[Worker]）：要求传入一个 Worker 的类本身（即 Worker 这个蓝图）
 
 class Role(Enum):
     """

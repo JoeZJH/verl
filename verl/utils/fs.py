@@ -192,7 +192,7 @@ def _check_directory_structure(folder_path, record_file):
     return existing_entries == recorded_entries
 
 
-def copy_to_local(
+def copy_to_local( # J：复制 HDFS 文件或目录到本地缓存目录
     src: str, cache_dir=None, filelock=".file.lock", verbose=False, always_recopy=False, use_shm: bool = False
 ) -> str:
     """Copy files/directories from HDFS to local cache with validation.

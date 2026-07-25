@@ -92,7 +92,7 @@ PKG_PATH_PREFIX = "pkg://"
 FILE_PATH_PREFIX = "file://"
 
 
-def load_module(module_path: str, module_name: Optional[str] = None) -> object:
+def load_module(module_path: str, module_name: Optional[str] = None) -> object: # J：根据路径加载模块
     """Load a module from a path.
 
     Args:
@@ -189,7 +189,7 @@ def deprecated(replacement: str = ""):
     return decorator
 
 
-def load_extern_object(module_path: str, object_name: str) -> object:
+def load_extern_object(module_path: str, object_name: str) -> object: # J：根据路径加载模块中的对象
     """Load an object from a module path.
 
     Args:
@@ -197,12 +197,12 @@ def load_extern_object(module_path: str, object_name: str) -> object:
         object_name (str):
             The name of the object to load with ``getattr(module, object_name)``.
     """
-    module = load_module(module_path)
+    module = load_module(module_path) # J：根据路径加载模块
 
-    if not hasattr(module, object_name):
+    if not hasattr(module, object_name): # J：检查模块是否包含指定对象
         raise AttributeError(f"Object not found in module: {object_name=}, {module_path=}.")
 
-    return getattr(module, object_name)
+    return getattr(module, object_name) # J：根据模块和对象名加载对象
 
 
 def load_class_from_fqn(fqn: str, description: str = "class") -> type:

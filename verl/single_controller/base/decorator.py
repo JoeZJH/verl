@@ -305,7 +305,7 @@ def make_nd_compute_dataproto_dispatch_fn(mesh_name):
 
 
 # Global registry for dispatch mode.
-DISPATCH_MODE_FN_REGISTRY = {
+DISPATCH_MODE_FN_REGISTRY = { # J：全局注册分发模式的字典，键为分发模式，值为分发函数字典
     Dispatch.ONE_TO_ALL: {
         "dispatch_fn": dispatch_one_to_all,
         "collect_fn": collect_all_to_all,
@@ -331,7 +331,7 @@ DISPATCH_MODE_FN_REGISTRY = {
 }
 
 
-def get_predefined_dispatch_fn(dispatch_mode):
+def get_predefined_dispatch_fn(dispatch_mode): # J：根据预定义的分发模式获取分发函数字典
     return DISPATCH_MODE_FN_REGISTRY[dispatch_mode]
 
 
@@ -380,22 +380,22 @@ def _check_execute_mode(execute_mode):
     assert isinstance(execute_mode, Execute), f"execute_mode must be a Execute. Got {execute_mode}"
 
 
-def _materialize_futures(*args, **kwargs):
+def _materialize_futures(*args, **kwargs): # J：将数据转换为具体值
     new_args = []
-    for arg in args:
+    for arg in args: # J：遍历位置参数
         if isinstance(arg, DataProtoFuture):
             arg = arg.get()
         # add more type to materialize
         new_args.append(arg)
-    for k, v in kwargs.items():
+    for k, v in kwargs.items(): # J：遍历关键字参数
         if isinstance(v, DataProtoFuture):
             kwargs[k] = v.get()
 
-    new_args = tuple(new_args)
-    return new_args, kwargs
+    new_args = tuple(new_args) # J：将参数转换为元组，确保不可变性
+    return new_args, kwargs # J：返回转换后的参数和关键字参数，用于后续的函数调用
 
 
-def register(dispatch_mode=Dispatch.ALL_TO_ALL, execute_mode=Execute.ALL, blocking=True, materialize_futures=True):
+def register(dispatch_mode=Dispatch.ALL_TO_ALL, execute_mode=Execute.ALL, blocking=True, materialize_futures=True): # J：注册装饰器，用于将函数注册为分布式执行配置
     """Register a function with distributed execution configuration.
 
     This decorator registers a function with specific dispatch and execution modes
@@ -403,13 +403,13 @@ def register(dispatch_mode=Dispatch.ALL_TO_ALL, execute_mode=Execute.ALL, blocki
     functions, and optionally materializes futures before execution.
 
     Args:
-        dispatch_mode:
+        dispatch_mode: # J：分发模式，默认值为 Dispatch.ALL_TO_ALL
             Dispatch mode for computation distribution. Default: Dispatch.ALL_TO_ALL.
-        execute_mode:
+        execute_mode: # J：执行模式，默认值为 Execute.ALL
             Execute mode for computation distribution. Default: Execute.ALL.
-        blocking:
+        blocking: # J：是否阻塞执行，默认值为 True
             Whether the execution should be blocking. Defaults to True.
-        materialize_futures:
+        materialize_futures: # J：是否将数据转换为具体值，默认值为 True
             Whether to materialize the data before dispatching. Defaults to True.
 
 
@@ -427,18 +427,18 @@ def register(dispatch_mode=Dispatch.ALL_TO_ALL, execute_mode=Execute.ALL, blocki
         @wraps(func)
         def inner(*args, **kwargs):
             if materialize_futures:
-                args, kwargs = _materialize_futures(*args, **kwargs)
-            return func(*args, **kwargs)
+                args, kwargs = _materialize_futures(*args, **kwargs) # J：将数据转换为具体值
+            return func(*args, **kwargs) # J：调用原始函数，将转换后的参数和关键字参数传递给函数
 
         @wraps(func)
         async def async_inner(*args, **kwargs):
             if materialize_futures:
-                args, kwargs = _materialize_futures(*args, **kwargs)
-            return await func(*args, **kwargs)
+                args, kwargs = _materialize_futures(*args, **kwargs) # J：将数据转换为具体值
+            return await func(*args, **kwargs) # J：调用原始异步函数，将转换后的参数和关键字参数传递给函数
 
-        wrapper = async_inner if inspect.iscoroutinefunction(func) else inner
-        attrs = {"dispatch_mode": dispatch_mode, "execute_mode": execute_mode, "blocking": blocking}
-        setattr(wrapper, MAGIC_ATTR, attrs)
+        wrapper = async_inner if inspect.iscoroutinefunction(func) else inner # J：根据函数是否为异步函数，选择不同的包装函数
+        attrs = {"dispatch_mode": dispatch_mode, "execute_mode": execute_mode, "blocking": blocking} # J：创建一个字典，用于存储分布式执行配置信息
+        setattr(wrapper, MAGIC_ATTR, attrs) # J：将 MAGIC_ATTR 属性传递给包装函数，即经过装饰器 register 后的函数，都会包含 MAGIC_ATTR 属性，用于存储分布式执行配置信息
         return wrapper
 
-    return decorator
+    return decorator # J：返回装饰器函数，用于装饰其他函数

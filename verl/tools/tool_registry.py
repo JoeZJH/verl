@@ -38,7 +38,7 @@ class ToolType(Enum):
     NATIVE = "native"
 
 
-def get_tool_class(cls_name):
+def get_tool_class(cls_name): # J：根据类名获取工具类
     module_name, class_name = cls_name.rsplit(".", 1)
     if module_name not in sys.modules:
         spec = importlib.util.find_spec(module_name)
@@ -52,26 +52,27 @@ def get_tool_class(cls_name):
     return tool_cls
 
 
-def initialize_tools_from_config(tools_config_file) -> list:
+def initialize_tools_from_config(tools_config_file) -> list: # J：从 yaml 配置文件加载 Native 工具
     """Instantiate ``BaseTool`` subclasses declared in a yaml config."""
     tools_config = OmegaConf.load(tools_config_file)
     tool_list = []
 
-    for tool_config in tools_config.tools:
-        cls_name = tool_config.class_name
-        tool_type = ToolType(tool_config.config.type)
-        tool_cls = get_tool_class(cls_name)
+    for tool_config in tools_config.tools: # J：遍历配置文件中的所有工具配置
+        cls_name = tool_config.class_name # J：工具类名
+        tool_type = ToolType(tool_config.config.type) # J：工具类型，当前仅支持 NATIVE
+        tool_cls = get_tool_class(cls_name) # J：根据类名动态获取工具类，包括加载模块和类
 
         match tool_type:
             case ToolType.NATIVE:
                 if tool_config.get("tool_schema", None) is None:
                     tool_schema = None
                 else:
+                    # J：将配置文件中的工具模式转换为 Pydantic 模型
                     tool_schema_dict = OmegaConf.to_container(tool_config.tool_schema, resolve=True)
                     tool_schema = OpenAIFunctionToolSchema.model_validate(tool_schema_dict)
                 tool = tool_cls(
-                    config=OmegaConf.to_container(tool_config.config, resolve=True),
-                    tool_schema=tool_schema,
+                    config=OmegaConf.to_container(tool_config.config, resolve=True), # J：将配置文件中的工具配置转换为 Python 字典
+                    tool_schema=tool_schema, # J：工具模式（Pydantic 模型）
                 )
                 tool_list.append(tool)
             case _:
@@ -80,22 +81,27 @@ def initialize_tools_from_config(tools_config_file) -> list:
     return tool_list
 
 
-def load_all_tools(
+def load_all_tools( # J：加载所有工具，包括 NativeTool 和 FunctionTool
     tool_config_path: Optional[str],
     function_tool_path: Optional[str],
 ) -> list[BaseTool | FunctionTool]:
     """Load native + function tools, check for name collisions, return merged list."""
+    # J：从配置文件加载本地工具，包括 NativeTool 和 FunctionTool
+    # # J：从 yaml 配置文件（通过 tool_config_path 指定）加载 Native 工具，YAML 配置文件 + BaseTool 的子类
+    # # J：返回的 BaseTool 包含 execute 携程方法用于执行工具
     native_tools: list = initialize_tools_from_config(tool_config_path) if tool_config_path else []
+    # # J：从 python 文件（通过 function_tool_path 指定）加载 Function 工具
+    # # J：返回的 FunctionTool 包含 call 协程方法用于执行工具
     function_tools: list[FunctionTool] = load_function_tools_from_path(function_tool_path) if function_tool_path else []
 
     if function_tools and native_tools:
-        existing = {t.name for t in native_tools}
-        collisions = sorted(t.name for t in function_tools if t.name in existing)
-        if collisions:
+        existing = {t.name for t in native_tools} # J：获取所有 Native 工具的名称
+        collisions = sorted(t.name for t in function_tools if t.name in existing) # J：获取所有 Function 工具的名称，与 Native 工具名称冲突
+        if collisions: # J：如果有冲突则抛出异常，native_tools 中的名称不能与 Function 工具名称冲突
             raise ValueError(
                 f"Function tool name(s) {collisions} collide with tools already declared in "
                 f"'{tool_config_path}'. Each tool name must be unique across `tool_config_path` "
                 f"and `function_tool_path`; rename one of them."
             )
 
-    return native_tools + function_tools
+    return native_tools + function_tools # J：合并 Native 工具和 Function 工具

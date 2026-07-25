@@ -19,7 +19,7 @@ from typing import Any
 
 # BaseConfig class inherits from collections.abc.Mapping, which means it can act like a dictionary
 @dataclass
-class BaseConfig(collections.abc.Mapping):
+class BaseConfig(collections.abc.Mapping): # J: 基础配置类，用于存储和管理配置参数，继承了 collections.abc.Mapping，所以可以像字典一样使用
     """The BaseConfig provides dict-like interface for a dataclass config.
 
     By default all fields in the config is not mutable, unless specified in

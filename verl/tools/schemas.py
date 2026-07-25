@@ -48,7 +48,27 @@ class OpenAIFunctionSchema(BaseModel):
     )
     strict: bool = False
 
-
+# J：OpenAI 函数工具 schema 定义，格式如下：
+# {
+#     "type": "function",                     # 固定值
+#     "function": {
+#         "name": "tool_name",                # 工具名称
+#         "description": "工具描述文本",        # 工具描述
+#         "parameters": {
+#             "type": "object",
+#             "properties": {
+#                 "param_name": {
+#                     "type": "string | integer | ...",  # 参数类型
+#                     "description": "参数描述",          # 可选
+#                     "enum": ["option1", "option2"]      # 可选，枚举值
+#                 },
+#                 # ... 更多参数
+#             },
+#             "required": ["param1", "param2"]  # 必填参数列表
+#         },
+#         "strict": False                     # 是否启用严格模式
+#     }
+# }
 class OpenAIFunctionToolSchema(BaseModel):
     """The schema of a tool in OpenAI format."""
 

@@ -598,7 +598,7 @@ class MindSpeedEngineConfig(McoreEngineConfig):
 
 
 @dataclass
-class TrainingWorkerConfig(BaseConfig):
+class TrainingWorkerConfig(BaseConfig): # J: 训练 Worker 配置类，包含模型、引擎、优化器、检查点、配置等参数，继承了 BaseConfig，所以可以像字典一样使用
     model_type: str = None  # model type (language_model/value_model)
     model_config: HFModelConfig = None
     engine_config: EngineConfig = None

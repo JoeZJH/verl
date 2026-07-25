@@ -330,23 +330,24 @@ class RayPPOTrainer:
         self.processor = processor
         self.config = config
 
-        self.hybrid_engine = config.actor_rollout_ref.hybrid_engine
+        self.hybrid_engine = config.actor_rollout_ref.hybrid_engine # J：是否使用混合引擎，Bool 类型，当前为 True
         assert self.hybrid_engine, "Currently, only support hybrid engine"
 
         if self.hybrid_engine:
+            # J：如果使用混合引擎，必须包含 ActorRolloutRefWorker（对应 ActorRolloutRef 角色 或 Role.ActorRollout 角色）
             assert Role.ActorRollout in role_worker_mapping or Role.ActorRolloutRef in role_worker_mapping, (
                 f"{role_worker_mapping.keys()=}"
             )
 
-        self.role_worker_mapping = role_worker_mapping
-        self.resource_pool_manager = resource_pool_manager
-        self.use_reference_policy = need_reference_policy(self.config)
-        self.use_teacher_policy = need_teacher_policy(self.config)
+        self.role_worker_mapping = role_worker_mapping # J：角色到 Worker 类的映射，键是角色，值是 Worker 类的类型
+        self.resource_pool_manager = resource_pool_manager # J：资源池管理器，用于管理 Ray 资源池
+        self.use_reference_policy = need_reference_policy(self.config) # J：根据是否需要 kl_in_reward 或 kl_loss（任意一个均需要参考策略），判断是否需要参考策略，Bool 类型，config.algorithm.use_kl_in_reward or config.actor_rollout_ref.actor.use_kl_loss
+        self.use_teacher_policy = need_teacher_policy(self.config) # J：根据是否开启 distillation，判断是否需要教师模型，Bool 类型, config.distillation
 
-        self.use_rm = need_reward_model(self.config)
+        self.use_rm = need_reward_model(self.config) # J：根据是否开启奖励模型，判断是否需要奖励模型，Bool 类型，config.reward.reward_model.enable
 
-        self.use_critic = need_critic(self.config)
-        self.ray_worker_group_cls = ray_worker_group_cls
+        self.use_critic = need_critic(self.config) # J：根据是否开启 critic，判断是否需要 critic，Bool 类型，config.critic.enable or config.algorithm.adv_estimator == AdvantageEstimator.GAE
+        self.ray_worker_group_cls = ray_worker_group_cls # J：RayWorkerGroup 类
         self.device_name = device_name if device_name else self.config.trainer.device
         self.validation_generations_logger = ValidationGenerationsLogger(
             project_name=self.config.trainer.project_name,
@@ -378,7 +379,7 @@ class RayPPOTrainer:
         # TODO: we have to make sure the batch size is divisible by the dp size
         from verl.trainer.main_ppo import create_rl_dataset, create_rl_sampler
 
-        if train_dataset is None:
+        if train_dataset is None: # J：如果未指定训练数据集，默认使用默认的 RLHF 数据集类
             train_dataset = create_rl_dataset(
                 self.config.data.train_files,
                 self.config.data,
@@ -386,7 +387,7 @@ class RayPPOTrainer:
                 self.processor,
                 max_samples=self.config.data.get("train_max_samples", -1),
             )
-        if val_dataset is None:
+        if val_dataset is None: # J：如果未指定验证数据集，默认使用默认的 RLHF 数据集类
             val_dataset = create_rl_dataset(
                 self.config.data.val_files,
                 self.config.data,
@@ -396,9 +397,9 @@ class RayPPOTrainer:
             )
         self.train_dataset, self.val_dataset = train_dataset, val_dataset
 
-        if train_sampler is None:
+        if train_sampler is None: # J：如果未指定训练采样器，默认使用默认的采样器
             train_sampler = create_rl_sampler(self.config.data, self.train_dataset)
-        if collate_fn is None:
+        if collate_fn is None: # J：如果未指定 collate_fn 函数，默认使用默认的 collate_fn 函数
             from verl.utils.dataset.rl_dataset import collate_fn as default_collate_fn
 
             collate_fn = default_collate_fn
@@ -406,49 +407,56 @@ class RayPPOTrainer:
         num_workers = self.config.data["dataloader_num_workers"]
 
         self.train_dataloader = StatefulDataLoader(
-            dataset=self.train_dataset,
-            batch_size=self.config.data.get("gen_batch_size", self.config.data.train_batch_size),
+            dataset=self.train_dataset, # J：训练数据集，根据 sampler 输出的 index 来采样数据
+            batch_size=self.config.data.get("gen_batch_size", self.config.data.train_batch_size), # J：gen_batch_size(生成的 batch 大小)，若未配置则使用 train_batch_size
             num_workers=num_workers,
             drop_last=True,
             collate_fn=collate_fn,
-            sampler=train_sampler,
+            sampler=train_sampler, # J：训练数据集的采样器，负责输出 index
         )
 
+        # J：优先使用 self.config.data.val_batch_size 配置
         val_batch_size = self.config.data.val_batch_size  # Prefer config value if set
         if val_batch_size is None:
-            val_batch_size = len(self.val_dataset)
+            val_batch_size = len(self.val_dataset) # J：默认使用整个验证数据集大小作为 batch 大小
 
         self.val_dataloader = StatefulDataLoader(
             dataset=self.val_dataset,
             batch_size=val_batch_size,
             num_workers=num_workers,
-            shuffle=self.config.data.get("validation_shuffle", True),
+            shuffle=self.config.data.get("validation_shuffle", True), # J：验证时也可以配置打乱数据，默认 True
             drop_last=False,
-            collate_fn=collate_fn,
+            collate_fn=collate_fn, # J：与训练数据集的 collate_fn 函数相同
         )
 
+        # J：确保训练数据集和验证数据集的 batch 大小大于 0
         assert len(self.train_dataloader) >= 1, "Train dataloader is empty!"
         assert len(self.val_dataloader) >= 1, "Validation dataloader is empty!"
 
+        # J：打印训练数据集和验证数据集的 batch 大小
         print(
             f"Size of train dataloader: {len(self.train_dataloader)}, Size of val dataloader: "
             f"{len(self.val_dataloader)}"
         )
 
-        total_training_steps = len(self.train_dataloader) * self.config.trainer.total_epochs
+        # J：计算总训练步数，默认等于训练数据集的 batch 大小乘以总轮数
+        total_training_steps = len(self.train_dataloader) * self.config.trainer.total_epochs # 注意：这里是数据的 epoch
 
+        # J：如果配置了 total_training_steps，则使用配置的值，不需要遍历完所有数据
         if self.config.trainer.total_training_steps is not None:
             total_training_steps = self.config.trainer.total_training_steps
 
-        self.total_training_steps = total_training_steps
-        print(f"Total training steps: {self.total_training_steps}")
+        self.total_training_steps = total_training_steps # J：将总训练步数赋值给 self.total_training_steps
+        print(f"Total training steps: {self.total_training_steps}") # J：打印总训练步数
 
         try:
-            OmegaConf.set_struct(self.config, True)
-            with open_dict(self.config):
+            OmegaConf.set_struct(self.config, True) # J：将配置设置为结构体，方便后续操作，防止创建不存在的字段
+            with open_dict(self.config): # J：将配置转换为字典，方便后续操作，此时可继续添加字段
                 if OmegaConf.select(self.config, "actor_rollout_ref.actor.optim"):
+                    # J：如果配置了 actor_rollout_ref.actor.optim，则将 total_training_steps 赋值给 optim.total_training_steps
                     self.config.actor_rollout_ref.actor.optim.total_training_steps = total_training_steps
                 if OmegaConf.select(self.config, "critic.optim"):
+                    # J：如果配置了 critic.optim，则将 total_training_steps 赋值给 optim.total_training_steps
                     self.config.critic.optim.total_training_steps = total_training_steps
         except Exception as e:
             print(f"Warning: Could not set total_training_steps in config. Structure missing? Error: {e}")
@@ -779,31 +787,37 @@ class RayPPOTrainer:
         1. Ray resource pools from configuration
         2. Worker groups for each role (actor, critic, etc.)
         """
-        self.resource_pool_manager.create_resource_pool()
+        # J：创建资源池并申请资源
+        # J：每个资源池包含多个 placement group，每个 placement group 对应一个节点
+        self.resource_pool_manager.create_resource_pool() # J：创建资源池，按照每个节点一个 placement group （包含多个 bundle）完成资源申请
 
+        # J: resource_pool_dict 是一个字典，键是池名，值是资源池对象
         self.resource_pool_to_cls = {pool: {} for pool in self.resource_pool_manager.resource_pool_dict.values()}
 
         # create actor and rollout
         actor_role = Role.ActorRolloutRef if Role.ActorRolloutRef in self.role_worker_mapping else Role.ActorRollout
-        if self.hybrid_engine:
-            actor_rollout_resource_pool = self.resource_pool_manager.get_resource_pool(actor_role)
-            actor_rollout_cls = RayClassWithInitArgs(
-                cls=self.role_worker_mapping[actor_role],
-                config=self.config.actor_rollout_ref,
-                distillation_config=self.config.get("distillation"),
-                role=str(actor_role),
+        if self.hybrid_engine: # J：当前为 True
+            actor_rollout_resource_pool = self.resource_pool_manager.get_resource_pool(actor_role) # J：根据 Role 获取对应的资源池对象
+            actor_rollout_cls = RayClassWithInitArgs( # J：创建 Ray Actor 类包装器，用于延迟实例化类，将类的构造函数参数存储起来，后续在需要时再实例化 Actor 类
+                cls=self.role_worker_mapping[actor_role], # J：根据 Role 获取对应的 Worker 类，这里对应 verl.workers.engine_workers.ActorRolloutRefWorker 类
+                config=self.config.actor_rollout_ref, # J：获取 Actor Rollout Ref 的配置
+                distillation_config=self.config.get("distillation"), # J：获取蒸馏配置
+                role=str(actor_role), # J：将 Role 转换为字符串，比如 Role.ActorRolloutRef 对应 "actor_rollout_ref"
             )
+            # J：将 Actor Rollout Ref 类包装器添加到资源池字典中
+            # J：键是 [池名]，值是 一个 dict 对象（键 是[str(角色)]，值是 RayClassWithInitArgs 对象）
             self.resource_pool_to_cls[actor_rollout_resource_pool][str(actor_role)] = actor_rollout_cls
         else:
-            raise NotImplementedError
+            raise NotImplementedError # J：当前仅支持混合引擎
 
         # create critic
         if self.use_critic:
-            resource_pool = self.resource_pool_manager.get_resource_pool(Role.Critic)
+            # J：Critic 角色的资源池对象不是
+            resource_pool = self.resource_pool_manager.get_resource_pool(Role.Critic) # J：根据 Role 获取对应的资源池对象
 
             from verl.workers.config import CriticConfig
 
-            critic_cfg: CriticConfig = omega_conf_to_dataclass(self.config.critic)
+            critic_cfg: CriticConfig = omega_conf_to_dataclass(self.config.critic) # J：将 OmegaConf 配置转换为数据class 对象
 
             # convert critic_cfg into TrainingWorkerConfig for the unified model engine worker
             from verl.workers.engine_workers import TrainingWorkerConfig
@@ -813,7 +827,7 @@ class RayPPOTrainer:
             engine_config.infer_max_token_len_per_gpu = critic_cfg.ppo_infer_max_token_len_per_gpu
             engine_config.max_token_len_per_gpu = critic_cfg.ppo_max_token_len_per_gpu
 
-            critic_cfg = TrainingWorkerConfig(
+            critic_cfg = TrainingWorkerConfig( # J：构造 TrainingWorkerConfig 对象，包含各种配置参数，继承了 BaseConfig，所以可以像字典一样使用
                 model_type="value_model",
                 model_config=orig_critic_cfg.model,
                 engine_config=engine_config,
@@ -822,11 +836,16 @@ class RayPPOTrainer:
                 extra_context=getattr(self, "_critic_extra_context", {}),
             )
 
-            critic_cls = RayClassWithInitArgs(cls=self.role_worker_mapping[Role.Critic], config=critic_cfg)
+            # J：Critic 角色对应的类是 verl.workers.engine_workers.TrainingWorker 类
+            critic_cls = RayClassWithInitArgs(cls=self.role_worker_mapping[Role.Critic], config=critic_cfg) # J：创建 Ray Actor 类包装器，用于延迟实例化类，将类的构造函数参数存储起来，后续在需要时再实例化 Actor 类
+            
+            # J：将 Critic Worker 类包装器添加到资源池字典中
+            # J：键是 [池名]，值是 一个 dict 对象（键 是[str(角色)]，值是 RayClassWithInitArgs 对象）
             self.resource_pool_to_cls[resource_pool][str(Role.Critic)] = critic_cls
 
+        # J：创建参考策略 Worker 类（若需要）
         # create reference policy if needed
-        if self.use_reference_policy and Role.RefPolicy in self.role_worker_mapping:
+        if self.use_reference_policy and Role.RefPolicy in self.role_worker_mapping: # J：当前一般 Role.RefPolicy 不在 role_worker_mapping 中
             resource_pool = self.resource_pool_manager.get_resource_pool(Role.RefPolicy)
             ref_policy_cls = RayClassWithInitArgs(
                 self.role_worker_mapping[Role.RefPolicy],
@@ -842,13 +861,15 @@ class RayPPOTrainer:
         # See https://github.com/verl-project/verl/blob/master/examples/tutorial/ray/tutorial.ipynb
         # for more information.
         all_wg = {}
+        # J：wg_kwargs 用于设置 RayWorkerGroup 的参数，比如超时时间、设备名称等
         wg_kwargs = {}  # Setting up kwargs for RayWorkerGroup
+        # J：OmegaConf.select() 用于从 OmegaConf 配置中提取值，返回一个 Optional 对象，这里是检查 ray_wait_register_center_timeout 是否被设置
         if OmegaConf.select(self.config.trainer, "ray_wait_register_center_timeout") is not None:
             wg_kwargs["ray_wait_register_center_timeout"] = self.config.trainer.ray_wait_register_center_timeout
         if OmegaConf.select(self.config.global_profiler, "steps") is not None:
             wg_kwargs["profile_steps"] = OmegaConf.select(self.config.global_profiler, "steps")
             # Only require nsight worker options when tool is nsys
-            if OmegaConf.select(self.config.global_profiler, "tool") == "nsys":
+            if OmegaConf.select(self.config.global_profiler, "tool") == "nsys": # J：检查上报工具是否为 nsys
                 assert (
                     OmegaConf.select(self.config.global_profiler.global_tool_config.nsys, "worker_nsight_options")
                     is not None
@@ -856,17 +877,21 @@ class RayPPOTrainer:
                 wg_kwargs["worker_nsight_options"] = OmegaConf.to_container(
                     OmegaConf.select(self.config.global_profiler.global_tool_config.nsys, "worker_nsight_options")
                 )
-        wg_kwargs["device_name"] = self.device_name
+        wg_kwargs["device_name"] = self.device_name # J：设置设备名称，用于指定要使用的 GPU 或 CPU
 
-        for resource_pool, class_dict in self.resource_pool_to_cls.items():
-            if not class_dict:
+        for resource_pool, class_dict in self.resource_pool_to_cls.items(): # J：遍历资源池字典，每个资源池包含多个角色的 Ray Actor 类包装器对象
+            if not class_dict: # J：class_dict 是一个 dict 对象（键 是[str(角色)]，值是 RayClassWithInitArgs 对象）
                 continue
+            # J：为每个资源池创建一个 RayWorkerGroup 对象
+            # J：create_colocated_worker_cls 返回封装了 WorkerDict 类（一个 @ray.remote 封装过的，Worker 的子类）的 RayClassWithInitArgs 类对象
+            # J：WorkerDict 内部 worker_dict 属性持有多个角色的 Actor 类的 去除 @ray.remote 装饰器后的类对象（普通对象）
             worker_dict_cls = create_colocated_worker_cls(class_dict=class_dict)
-            wg_dict = self.ray_worker_group_cls(
+            wg_dict = self.ray_worker_group_cls( # J: 每个资源池创建一个 RayWorkerGroup 对象
                 resource_pool=resource_pool,
                 ray_cls_with_init=worker_dict_cls,
                 **wg_kwargs,
             )
+            # TOOD：
             spawn_wg = wg_dict.spawn(prefix_set=class_dict.keys())
             all_wg.update(spawn_wg)
 

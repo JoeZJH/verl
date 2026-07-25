@@ -25,7 +25,7 @@ __all__ = [
 ]
 
 
-def normalize_token_ids(tokenized_output) -> list[int]:
+def normalize_token_ids(tokenized_output) -> list[int]: # J：将各种格式的分词后的输出转换为平铺的 token ids 列表
     """Normalize tokenizer outputs into a flat ``list[int]``.
 
     This handles Transformers 4/5 differences where ``apply_chat_template(tokenize=True)``
@@ -193,17 +193,22 @@ def hf_processor(name_or_path, **kwargs):
     from transformers import AutoConfig, AutoProcessor, PreTrainedTokenizerBase
 
     try:
+        # J: 如果不是多模态，这里会返回什么？
+        # J：AutoProcessor.from_pretrained 只针对多模态模型设计；加载普通单模态模型（纯文本 / 纯图像分类等无 Processor 的模型）时，会返回纯文本模型的 tokenizer 实例
         processor = AutoProcessor.from_pretrained(name_or_path, **kwargs)
         # In newer transformers, AutoProcessor may legitimately fall back to a
         # tokenizer backend (e.g. TokenizersBackend) for text-only models.
         # Treat it as "no multimodal processor" and let callers use hf_tokenizer.
-        if isinstance(processor, PreTrainedTokenizerBase):
+        # J: 如果 processor 是 纯文本的实例(TokenizersBackend(PreTrainedTokenizerBase))，说明是纯文本模型，直接返回 None
+        if isinstance(processor, PreTrainedTokenizerBase): # J: 判断，如果 processor 是 PreTrainedTokenizerBase 的实例（即纯文本模型得实例，此时回退到 tokenizer），直接返回 None
             return None
 
+        # J: 加载模型配置，来自 config.json 文件，还会添加一些其他配置文件
         config = AutoConfig.from_pretrained(name_or_path, **kwargs)
 
         # Bind vlm model's get_rope_index method to processor.
-        processor.config = config
+        processor.config = config # J: 将读取到的 config 绑定模型配置到 processor 上（注：这里 processor 中可能不存在 config 属性，必须要绑定一下）
+        # J: 根据 processor 类型，导入对应的模型 类，用于绑定 get_rope_index 和 get_vision_position_ids 到 processor
         model_class = None
         match processor.__class__.__name__:
             case "Qwen2VLProcessor":
@@ -228,7 +233,9 @@ def hf_processor(name_or_path, **kwargs):
                 raise ValueError(f"Unsupported processor type: {processor.__class__.__name__}")
 
         if model_class is not None:
+            # J: 绑定 get_rope_index 方法到 processor
             processor.get_rope_index = types.MethodType(model_class.get_rope_index, processor)
+            # J: 绑定 get_vision_position_ids 方法到 processor
             if hasattr(model_class, "get_vision_position_ids"):
                 processor.get_vision_position_ids = types.MethodType(model_class.get_vision_position_ids, processor)
     except Exception as e:

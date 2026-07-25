@@ -21,9 +21,8 @@ import asyncio
 
 from verl.tools.function_tool import function_tool
 
-
-@function_tool
-def get_weather(city: str) -> dict:
+@function_tool # J：注册函数工具到工具列表 verl.tools.function_tool.FUNCTION_TOOL_REGISTRY
+def get_weather(city: str) -> dict: # J：获取天气函数工具，测试用
     """Get the current weather for a city.
 
     Args:
@@ -37,11 +36,11 @@ def get_weather(city: str) -> dict:
         "san francisco": {"temperature_c": 14.8, "condition": "fog"},
         "new york": {"temperature_c": 21.6, "condition": "sunny"},
     }
-    return table.get(city.lower(), {"temperature_c": -273.15, "condition": "unknown"})
+    return table.get(city.lower(), {"temperature_c": -273.15, "condition": "unknown"}) # J：返回天气信息, 如果城市不存在则返回未知天气
 
 
-@function_tool
-def calculator(expression: str) -> str:
+@function_tool # J：注册函数工具到工具列表 verl.tools.function_tool.FUNCTION_TOOL_REGISTRY
+def calculator(expression: str) -> str: # J：计算函数工具
     """Evaluate an arithmetic expression and return the result.
 
     Supports +, -, *, /, **, parentheses, and unary minus. Use this for any
@@ -56,21 +55,21 @@ def calculator(expression: str) -> str:
     ops = {ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul, ast.Div: op.truediv, ast.Pow: op.pow, ast.USub: op.neg}
 
     def _eval(node):
-        if isinstance(node, ast.Constant) and isinstance(node.value, int | float):  # noqa: UP038
-            return node.value
-        if isinstance(node, ast.BinOp):
-            return ops[type(node.op)](_eval(node.left), _eval(node.right))
-        if isinstance(node, ast.UnaryOp):
-            return ops[type(node.op)](_eval(node.operand))
+        if isinstance(node, ast.Constant) and isinstance(node.value, int | float):  # noqa: UP038 # J：常量值
+            return node.value # J：返回常量值
+        if isinstance(node, ast.BinOp): # J：二元运算符
+            return ops[type(node.op)](_eval(node.left), _eval(node.right)) # J：递归计算二元运算符的结果
+        if isinstance(node, ast.UnaryOp): # J：一元运算符
+            return ops[type(node.op)](_eval(node.operand)) # J：递归计算一元运算符的结果
         raise ValueError(f"unsupported node: {ast.dump(node)}")
 
     try:
-        return str(_eval(ast.parse(expression, mode="eval").body))
+        return str(_eval(ast.parse(expression, mode="eval").body)) # J：计算表达式的结果
     except Exception as e:
         return f"ERROR: {e}"
 
 
-@function_tool
+@function_tool # J：注册函数工具到工具列表 verl.tools.function_tool.FUNCTION_TOOL_REGISTRY
 async def fetch_url(url: str) -> str:
     """Fetch the contents of a URL (async).
 
@@ -83,4 +82,4 @@ async def fetch_url(url: str) -> str:
     # Yield once so the tool actually behaves like an awaitable, then return
     # a deterministic stub payload that tests can assert on.
     await asyncio.sleep(0)
-    return f"<stub body for {url}>"
+    return f"<stub body for {url}>" # J：返回模拟的URL内容, 这里只能用于测试

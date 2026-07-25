@@ -47,7 +47,7 @@ def omega_conf_to_dataclass(config: DictConfig | dict, dataclass_type: Optional[
         )
         from hydra.utils import instantiate
 
-        return instantiate(config, _convert_="partial")
+        return instantiate(config, _convert_="partial") # J：将 OmegaConf 配置转换为数据class 对象，支持递归转换，类名是 config 中的 _target_ 参数
 
     if not is_dataclass(dataclass_type):
         raise ValueError(f"{dataclass_type} must be a dataclass")
@@ -84,15 +84,15 @@ def validate_config(
         use_critic (bool): is critic needed
     """
     # number of GPUs total
-    n_gpus = config.trainer.n_gpus_per_node * config.trainer.nnodes
+    n_gpus = config.trainer.n_gpus_per_node * config.trainer.nnodes # J：计算 GPU 总数
 
-    if not config.actor_rollout_ref.actor.use_dynamic_bsz:
+    if not config.actor_rollout_ref.actor.use_dynamic_bsz: # J：判断是否使用动态 Batch
         if config.actor_rollout_ref.actor.strategy == "megatron":
             model_parallel_size = (
                 config.actor_rollout_ref.actor.megatron.tensor_model_parallel_size
                 * config.actor_rollout_ref.actor.megatron.pipeline_model_parallel_size
             )
-            assert (
+            assert ( # J：TP * PP * CP 是最小并行单位
                 n_gpus % (model_parallel_size * config.actor_rollout_ref.actor.megatron.context_parallel_size) == 0
             ), (
                 f"n_gpus ({n_gpus}) must be divisible by model_parallel_size ({model_parallel_size}) times "
@@ -100,14 +100,14 @@ def validate_config(
             )
             megatron_dp = n_gpus // (
                 model_parallel_size * config.actor_rollout_ref.actor.megatron.context_parallel_size
-            )
+            ) # J：Megatron DP = GPUs 除以 （TP * PP * CP）
             minimal_bsz = megatron_dp * config.actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu
         else:
-            minimal_bsz = n_gpus
+            minimal_bsz = n_gpus # J：minimal Batch 大小 = GPU 数量，训练 Batch 大小必须是 GPU 数量的整数倍
 
         # 1. Check total batch size for data correctness
         real_train_batch_size = config.data.train_batch_size * config.actor_rollout_ref.rollout.n
-        assert real_train_batch_size % minimal_bsz == 0, (
+        assert real_train_batch_size % minimal_bsz == 0, ( # J：训练 Batch 大小必须是 minimal Batch 大小的整数倍
             f"real_train_batch_size ({real_train_batch_size}) must be divisible by minimal possible batch size "
             f"({minimal_bsz})"
         )

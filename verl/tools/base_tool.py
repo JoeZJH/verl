@@ -20,8 +20,8 @@ from verl.utils.rollout_trace import rollout_trace_op
 
 from .schemas import OpenAIFunctionToolSchema, ToolResponse
 
-
-class BaseTool:
+# J：沙盒实现可参考 examples.tutorial.agent_loop_get_started.sandbox.SandboxTool
+class BaseTool: # J：基础工具类，所有工具的基类
     """Base class for tools.
 
     A tool should support the following methods:
@@ -35,15 +35,15 @@ class BaseTool:
 
     def __init__(self, config: dict, tool_schema: OpenAIFunctionToolSchema):
         self.config = config
-        self.tool_schema = tool_schema or self.get_openai_tool_schema()
+        self.tool_schema = tool_schema or self.get_openai_tool_schema() # J：工具 schema
         assert self.tool_schema is not None, "Tool schema is not set!"
-        self.name = self.tool_schema.function.name
-        print(json.dumps(self.tool_schema.model_dump(exclude_unset=True, exclude_none=True), indent=2))
+        self.name = self.tool_schema.function.name # J：工具名称
+        print(json.dumps(self.tool_schema.model_dump(exclude_unset=True, exclude_none=True), indent=2)) # J：打印工具 schema
 
-    def get_openai_tool_schema(self) -> OpenAIFunctionToolSchema:
+    def get_openai_tool_schema(self) -> OpenAIFunctionToolSchema: # J：获取工具的 OpenAI 格式 schema
         return self.tool_schema
 
-    async def create(self, instance_id: Optional[str] = None, **kwargs) -> tuple[str, ToolResponse]:
+    async def create(self, instance_id: Optional[str] = None, **kwargs) -> tuple[str, ToolResponse]: # J：创建工具实例
         """Create a tool instance.
 
         Args:
@@ -58,8 +58,9 @@ class BaseTool:
         else:
             return instance_id, ToolResponse()
 
+    # J：执行工具，详情请参考 examples.tutorial.agent_loop_get_started.sandbox.SandboxTool.execute
     @rollout_trace_op
-    async def execute(self, instance_id: str, parameters: dict[str, Any], **kwargs) -> tuple[ToolResponse, float, dict]:
+    async def execute(self, instance_id: str, parameters: dict[str, Any], **kwargs) -> tuple[ToolResponse, float, dict]: # J：执行工具，返回工具响应、奖励分数和指标
         """Execute the tool.
 
         Args:
@@ -71,7 +72,7 @@ class BaseTool:
             tool_reward_score: The step reward score of the tool.
             tool_metrics: The metrics of the tool.
         """
-        return ToolResponse(text="Updated the tool state."), 0.0, {}
+        return ToolResponse(text="Updated the tool state."), 0.0, {} # J：返回工具响应、奖励分数和指标
 
     async def calc_reward(self, instance_id: str, **kwargs) -> float:
         """Calculate the reward of the tool.
