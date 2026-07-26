@@ -148,7 +148,7 @@ def timeout_limit(seconds: float, use_signals: bool = False):
     return decorator
 
 
-def union_two_dict(dict1: dict, dict2: dict):
+def union_two_dict(dict1: dict, dict2: dict): # J：合并两个字典(将 dict2 合并到 dict1 中并返回 dict1)，如果 key 相同，则 value 必须相同
     """Union two dict. Will throw an error if there is an item not the same object with the same key.
 
     Args:

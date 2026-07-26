@@ -144,6 +144,7 @@ def _timer(name: str, timing_raw: dict[str, float]):
         name (str): The name/identifier for this timing measurement.
         timing_raw (Dict[str, float]): Dictionary to store timing information.
     """
+    # J：创建一个定时器实例，Timer 是一个上下文管理器，用于测量代码执行时间（实现了 __enter__ 和 __exit__ 方法）
     with Timer(name=name, logger=None) as timer:
         yield
     if name not in timing_raw:
@@ -169,7 +170,7 @@ def simple_timer(name: str, timing_raw: dict[str, float]):
 
 
 @contextmanager
-def marked_timer(
+def marked_timer( # J：带标记的定时器上下文管理器
     name: str,
     timing_raw: dict[str, float],
     color: str = None,
@@ -192,6 +193,7 @@ def marked_timer(
     Yields:
         None: This is a context manager that yields control back to the code block.
     """
+    # J：`yield from _timer(name, timing_raw)` 等价于把 `_timer` 的 `yield` 委托给外层，形成上下文管理器委托链
     yield from _timer(name, timing_raw)
 
 

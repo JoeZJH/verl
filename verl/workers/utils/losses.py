@@ -144,7 +144,7 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
     return policy_loss, metrics
 
 
-def value_loss(config: CriticConfig, model_output, data: TensorDict, dp_group=None):
+def value_loss(config: CriticConfig, model_output, data: TensorDict, dp_group=None): # J：Critic 损失函数计算
     """value loss
 
     Args:

@@ -24,12 +24,12 @@ logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
-class RewardModelManager:
+class RewardModelManager: # J：RewardModelManager 是 reward model 的管理类，负责初始化 reward model 的 replica 和路由
     """Reward model manager."""
 
     def __init__(
         self,
-        config: RewardModelConfig,
+        config: RewardModelConfig, # J：config 是 reward model 的配置
         resource_pool: RayResourcePool = None,
     ):
         """
@@ -49,25 +49,25 @@ class RewardModelManager:
 
     def _initialize_llm_servers(self):
         rollout_config = self.config.rollout
-        rollout_world_size = (
+        rollout_world_size = ( # J：rollout_world_size 是 rollout 角色的 world_size，即 rollout 角色的 GPU 数量的乘积
             rollout_config.tensor_model_parallel_size
             * rollout_config.data_parallel_size
             * rollout_config.pipeline_model_parallel_size
         )
-        world_size = (
+        world_size = ( # J：world_size 是所有 worker 的数量或所有节点的 GPU 数量的乘积（standalone mode 下为 n_gpus_per_node * nnodes）
             self.resource_pool.world_size
             if self.resource_pool  # colocate mode
             else self.config.n_gpus_per_node * self.config.nnodes  # standalone mode
         )
-        num_replicas = world_size // rollout_world_size
-        assert num_replicas > 0, (
+        num_replicas = world_size // rollout_world_size # J：num_replicas 是 rollout_world_size 的整数倍
+        assert num_replicas > 0, ( # J：num_replicas 必须大于 0，否则无法运行 reward model，小于等于 0 时，表示 world_size 小于 rollout_world_size
             f"Not enough GPUs to run the reward model. "
             f"world_size ({world_size}) < rollout_world_size ({rollout_world_size}). "
             f"Check your resource pool or standalone config (n_gpus_per_node, nnodes)."
         )
 
         rollout_replica_class = get_rollout_replica_class(rollout_config.name)
-        model_config = HFModelConfig(path=self.config.model_path)
+        model_config = HFModelConfig(path=self.config.model_path) # J：model_config 是 reward model 的配置，包含模型路径、分层配置等
         self.tokenizer = model_config.get_processor()
         self.rollout_replicas = [
             rollout_replica_class(

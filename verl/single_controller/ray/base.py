@@ -237,7 +237,7 @@ class ResourcePoolManager:
 
     def get_resource_pool(self, role) -> RayResourcePool: # J：根据 Role 获取对应的资源池对象
         """Get the resource pool of the worker_cls"""
-        return self.resource_pool_dict[self.mapping[role]]
+        return self.resource_pool_dict[self.mapping[role]] # J：根据 Role 获取对应的资源池对象（RayResourcePool）
 
     def get_n_gpus(self) -> int:
         """Get the number of gpus in this cluster."""
@@ -378,7 +378,7 @@ class RayClassWithInitArgs(ClassWithInitArgs): # J: 类包装器，用于延迟�
         """
         self._additional_resource = additional_resource
 
-    def update_options(self, options: dict):
+    def update_options(self, options: dict): # J：更新 options 字典，将 options 中的配置参数添加到 self._options 中
         """Update the Ray actor creation options.
 
         Args:
@@ -386,7 +386,7 @@ class RayClassWithInitArgs(ClassWithInitArgs): # J: 类包装器，用于延迟�
         """
         self._options.update(options)
 
-    def __call__( # J: 用于创建 Ray Actor 的方法
+    def __call__( # J: 用于创建持有的类的实例（比如 WorkerDict 类的实例）
         self,
         placement_group,
         placement_group_bundle_idx,
@@ -408,18 +408,18 @@ class RayClassWithInitArgs(ClassWithInitArgs): # J: 类包装器，用于延迟�
         Returns:
             A Ray actor handle with the configured options
         """
-        if sharing_with is not None:
-            target_node_id = ray.get(sharing_with.get_node_id.remote())
-            visible_devices = ray.get(sharing_with.get_cuda_visible_devices.remote())
-            options = {"scheduling_strategy": NodeAffinitySchedulingStrategy(node_id=target_node_id, soft=False)}
-            return self.cls.options(**options).remote(*self.args, cuda_visible_devices=visible_devices, **self.kwargs)
+        if sharing_with is not None: # J: 如果 sharing_with 不为空，说明要与指定的 Ray Actor 类的实例共享资源
+            target_node_id = ray.get(sharing_with.get_node_id.remote()) # J: 获取指定的 Ray Actor 类的实例所属的节点 ID
+            visible_devices = ray.get(sharing_with.get_cuda_visible_devices.remote()) # J: 获取指定的 Ray Actor 类的实例可见的 CUDA 设备列表
+            options = {"scheduling_strategy": NodeAffinitySchedulingStrategy(node_id=target_node_id, soft=False)} # J: 用于将 Ray Actor 类的实例分配到指定的节点 ID 中
+            return self.cls.options(**options).remote(*self.args, cuda_visible_devices=visible_devices, **self.kwargs) # J: 在指定共享资源上创建持有的类的实例（比如 WorkerDict 类的实例），并返回 Ray Actor 类的实例
 
         options = {
-            "scheduling_strategy": PlacementGroupSchedulingStrategy(
+            "scheduling_strategy": PlacementGroupSchedulingStrategy( # J: 用于将 Ray Actor 类的实例分配到指定的 placement group 中
                 placement_group=placement_group, placement_group_bundle_index=placement_group_bundle_idx
             )
         }
-        options.update(self._options)
+        options.update(self._options) # J: 更新 options 字典，将 self._options 中的配置参数添加到 options 中
 
         if use_gpu and device_name == "cuda":
             options["num_gpus"] = num_gpus
@@ -433,7 +433,7 @@ class RayClassWithInitArgs(ClassWithInitArgs): # J: 类包装器，用于延迟�
         # print("cls:", self.cls)
         # print("args: ", self.args)
         # print("kwargs: ", self.kwargs)
-        return self.cls.options(**options).remote(*self.args, **self.kwargs)
+        return self.cls.options(**options).remote(*self.args, **self.kwargs) # J: 创建持有的类的实例（比如 WorkerDict 类的实例），并返回 Ray Actor 类的实例
 
 
 class RayWorkerGroup(WorkerGroup): # J: Ray 工作进程组类，用于管理 Ray 工作进程组，每个资源池创建一个 RayWorkerGroup 对象
@@ -447,7 +447,7 @@ class RayWorkerGroup(WorkerGroup): # J: Ray 工作进程组类，用于管理 Ra
     def __init__(
         self,
         resource_pool: RayResourcePool = None,
-        ray_cls_with_init: RayClassWithInitArgs = None,
+        ray_cls_with_init: RayClassWithInitArgs = None, # J: 封装了 WorkerDict 类的 RayClassWithInitArgs 类对象, WorkerDict 对象的 self.worker_dict 属性 是一个字典，键为角色名，值为角色的 Ray Actor 类普通实例
         bin_pack: bool = True,
         name_prefix: str = None,
         detached=False,
@@ -500,7 +500,7 @@ class RayWorkerGroup(WorkerGroup): # J: Ray 工作进程组类，用于管理 Ra
         elif isinstance(resource_pool, SubRayResourcePool):
             self._init_with_subresource_pool(
                 resource_pool=resource_pool,
-                ray_cls_with_init=ray_cls_with_init,
+                ray_cls_with_init=ray_cls_with_init, # J: 封装了 WorkerDict 类的 RayClassWithInitArgs 类对象, WorkerDict 对象的 self.worker_dict 属性 是一个字典，键为角色名，值为角色的 Ray Actor 类普通实例
                 bin_pack=bin_pack,
                 detached=detached, # J: 是否创建离散的工作进程，默认 False
                 worker_env=self.customized_worker_env,
@@ -508,14 +508,15 @@ class RayWorkerGroup(WorkerGroup): # J: Ray 工作进程组类，用于管理 Ra
         else:
             self._init_with_resource_pool(
                 resource_pool=resource_pool, # J: 指向资源池的引用，包含 placement group 实例，和 world_size 等信息
-                ray_cls_with_init=ray_cls_with_init, # J: RayClassWithInitArgs 类对象，用于初始化 Ray Actor 对象
+                ray_cls_with_init=ray_cls_with_init, # J: 封装了 WorkerDict 类的 RayClassWithInitArgs 类对象, WorkerDict 对象的 self.worker_dict 属性 是一个字典，键为角色名，值为角色的 Ray Actor 类普通实例
                 bin_pack=bin_pack, # J: 是否使用严格 bin packing 资源分配，默认 True
                 detached=detached, # J: 是否创建离散的工作进程，默认 False
                 worker_env=self.customized_worker_env, # J: 自定义的工作进程环境变量（worker_env 字段，默认空字典
             )
 
         if ray_cls_with_init is not None:
-            self._bind_worker_method(self.ray_cls_with_init.cls, func_generator) # J: 绑定 Ray Actor 类的方法到 self（RayWorkerGroup 对象） 上，同时返回绑定的方法名称列表
+            # J：self.ray_cls_with_init.cls 是 WorkerDict
+            self._bind_worker_method(self.ray_cls_with_init.cls, func_generator) # J: 绑定 self.ray_cls_with_init.cls（WorkerDict 类）的方法到 self（RayWorkerGroup 对象） 上，同时返回绑定的方法名称列表
 
         self.wg_dict = None
         self.method_names = []
@@ -564,7 +565,7 @@ class RayWorkerGroup(WorkerGroup): # J: Ray 工作进程组类，用于管理 Ra
     def _init_with_resource_pool( # J: 初始化工作进程组，从资源池创建新工作进程，每个 rank 对应一个工作进程，都一一完成 Worker 初始化
         self,
         resource_pool, # J: 指向资源池的引用，包含 placement group 实例，和 world_size 等信息
-        ray_cls_with_init, # J: RayClassWithInitArgs 类对象，用于初始化 Ray Actor 对象
+        ray_cls_with_init, # J: 封装了 WorkerDict 类的 RayClassWithInitArgs 类对象, WorkerDict 对象的 self.worker_dict 属性 是一个字典，键为角色名，值为角色的 Ray Actor 类普通实例
         bin_pack, # J: 是否使用严格 bin packing 资源分配，默认 True
         detached, # J: 是否创建离散的工作进程，默认 False
         worker_env=None, # J: 自定义的工作进程环境变量（worker_env 字段，默认空字典）
@@ -593,15 +594,15 @@ class RayWorkerGroup(WorkerGroup): # J: Ray 工作进程组类，用于管理 Ra
             if pg_idx == 0:
                 self._get_master_addr_port(pg, bundle_index=0, master_port_range=self._ray_master_port_range)
 
-            for local_rank in range(local_world_size): # J: 遍历本地工作进程组中的每个工作进程
-                rank += 1
-                self._create_worker( # J: 根据配置创建一个工作进程，初始化 Worker 实例
+            for local_rank in range(local_world_size): # J: 遍历本地工作进程组中的每个进程的 rank
+                rank += 1 # rank 总数 +1
+                self._create_worker( # J: 根据配置创建一个工作进程，初始化 Worker 实例（由ray_cls_with_init 决定创建 WorkerDict 类的实例）
                     rank=rank, # J: 每个工作进程都有一个唯一的 rank，用于标识和管理
                     pg_idx=pg_idx, # J: 每个工作进程所属的 placement group 索引，用于确定工作进程在资源池中的位置
                     pg=pg, # J: 每个工作进程所属的 placement group 实例，用于指定工作进程在资源池中的位置
                     local_rank=local_rank, # J: 每个工作进程在本地工作进程组中的 rank，用于确定工作进程在本地资源池中的位置
                     resource_pool=resource_pool, # J: 指向资源池的引用，用于获取资源池的 world_size 等信息
-                    ray_cls_with_init=ray_cls_with_init, # J: RayClassWithInitArgs 类实例，包含初始化参数和待初始化的 Ray Actor 类
+                    ray_cls_with_init=ray_cls_with_init, # J: 封装了 WorkerDict 类的 RayClassWithInitArgs 类对象, WorkerDict 对象的 self.worker_dict 属性 是一个字典，键为角色名，值为角色的 Ray Actor 类普通实例
                     worker_env=worker_env, # J: 自定义的工作进程环境变量（worker_env 字段，默认空字典）
                     detached=detached, # J: 是否创建离散的工作进程，默认 False
                 )
@@ -647,7 +648,7 @@ class RayWorkerGroup(WorkerGroup): # J: Ray 工作进程组类，用于管理 Ra
             )
 
     # J: 创建一个工作进程
-    def _create_worker(self, rank, pg_idx, pg, local_rank, resource_pool, ray_cls_with_init, worker_env, detached): # J: 创建一个工作进程
+    def _create_worker(self, rank, pg_idx, pg, local_rank, resource_pool, ray_cls_with_init, worker_env, detached): # J: 创建一个工作进程（由 ray_cls_with_init 决定，可能是 WorkerDict 类的实例）
         world_size = resource_pool.world_size
         use_gpu = resource_pool.use_gpu
         if self.use_gpu and not use_gpu:
@@ -678,16 +679,20 @@ class RayWorkerGroup(WorkerGroup): # J: Ray 工作进程组类，用于管理 Ra
         import re
 
         # J：cia 是 class with init args 的简称
-        cia_name = type(ray_cls_with_init.cls).__name__
+        cia_name = type(ray_cls_with_init.cls).__name__ # J: 获取到的是 ray_cls_with_init 中封装的类的名称（比如 WorkerDict 类的名称）
+        # J：在 cia_name 里，查找第一次出现的 ActorClass(xxx) 格式内容，并把括号内部所有内容提取出来
         match = re.search(r"ActorClass\(([^)]+)\)", cia_name)  # ray.remote(Obj) -> "ActorClass(Obj)"
+        # J：如果匹配成功，提取括号内部所有内容，否则保持原名称
         cia_name = match.group(1) if match else cia_name  # "ActorClass(Obj)" -> "Obj"
+        # J：TODO，待 Debug 打印查看名称
         name = f"{self.name_prefix}{cia_name}_{pg_idx}:{local_rank}"  # e.g. Worker_2:5
 
         if self.profile_steps and self.device_name == "cuda":
             ray_cls_with_init.update_options(
                 {
                     "runtime_env": {
-                        "env_vars": env_vars,
+                        # J：这里注入的环境变量可以后续在 任务/Actor 中通过 ray.get_runtime_context().runtime_env.get("config") 获取
+                        "env_vars": env_vars, # J：包含系统环境变量和用户自定义环境变量，比如 WORLD_SIZE, RANK, WG_PREFIX, WG_BACKEND, RAY_LOCAL_WORLD_SIZE, MASTER_ADDR, MASTER_PORT
                         "nsight": self.worker_nsight_options,
                     },
                     "name": name,
@@ -700,7 +705,7 @@ class RayWorkerGroup(WorkerGroup): # J: Ray 工作进程组类，用于管理 Ra
             ray_cls_with_init.update_options({"lifetime": "detached"})
 
         # create a worker
-        worker = ray_cls_with_init( # J: 创建一个工作进程，初始化 Ray Actor 类实例（真正的 Worker 实例创建）
+        worker = ray_cls_with_init( # J: ray_cls_with_init 是一个 RayClassWithInitArgs 类对象，这里是调用 RayClassWithInitArgs 类对象的 __call__ 方法，创建一个 WorkerDict 工作进程
             placement_group=pg, # J: 指定工作进程所属的 placement group
             placement_group_bundle_idx=local_rank, # J: 使用 local_rank 来指定工作进程在 placement group 中的 bundle 索引
             use_gpu=self.use_gpu,
@@ -708,7 +713,7 @@ class RayWorkerGroup(WorkerGroup): # J: Ray 工作进程组类，用于管理 Ra
             device_name=self.device_name,
         )
         # J: _workers 和 _worker_names 是对应关系，每个工作进程都有一个名称
-        self._workers.append(worker) # J: 将新创建的工作进程添加到 self._workers 列表中
+        self._workers.append(worker) # J: 将新创建的工作进程（WorkerDict 类的实例）添加到 self._workers 列表中
         self._worker_names.append(name) # J: 将新创建的工作进程的名称添加到 self._worker_names 列表中
 
     @property
@@ -716,12 +721,12 @@ class RayWorkerGroup(WorkerGroup): # J: Ray 工作进程组类，用于管理 Ra
         return self._worker_names
 
     @classmethod
-    def from_detached(
-        cls,
+    def from_detached( # J: 从已存在的断开连接的 Workers 创建一个 RayWorkerGroup 实例
+        cls, # J: RayWorkerGroup 类自身，后续可通过 cls 类访问变量或者初始化对象
         name_prefix=None,
         worker_names=None,
         worker_handles=None,
-        ray_cls_with_init=None,
+        ray_cls_with_init=None, # J: 封装了 WorkerDict 类的 RayClassWithInitArgs 类对象, WorkerDict 对象的 self.worker_dict 属性 是一个字典，键为角色名，值为角色的 Ray Actor 类普通实例
         **kwargs,
     ):
         """Create a worker group from existing detached workers.
@@ -734,52 +739,56 @@ class RayWorkerGroup(WorkerGroup): # J: Ray 工作进程组类，用于管理 Ra
         Returns:
             A new RayWorkerGroup instance
         """
-        worker_group = cls(
+        worker_group = cls( # J: 创建一个 RayWorkerGroup 实例
             resource_pool=None,
-            ray_cls_with_init=ray_cls_with_init,
+            ray_cls_with_init=ray_cls_with_init, # J: 封装了 WorkerDict 类的 RayClassWithInitArgs 类对象, WorkerDict 对象的 self.worker_dict 属性 是一个字典，键为角色名，值为角色的 Ray Actor 类普通实例
             name_prefix=name_prefix,
             worker_names=worker_names,
             worker_handles=worker_handles,
             **kwargs,
         )
-        return worker_group
+        return worker_group # 返回创建的 RayWorkerGroup 实例
 
-    def spawn(self, prefix_set):
+    def spawn(self, prefix_set): # J: 创建一个字典，键为 prefix，值为 RayWorkerGroup 实例字典，每个 RayWorkerGroup 实例仅包含指定的 prefix 开头的方法
+                                 # J：理解：生成的每个 RayWorkerGroup 实例都共享相同的 Workers 的资源（不会重新创建 Worker），但每个 RayWorkerGroup 实例仅包含指定的 prefix 开头的方法，且将方法名中的前缀替换为原始方法名
         """Spawn to a dictionary of worker groups, each with a subset of method with prefix.
 
         Args:
-            prefix_set: Set of prefixes to create worker groups for
+            prefix_set: Set of prefixes to create worker groups for # J：一般 Role 枚举类的名称，为 {"actor", "critic"} 等
 
         Returns:
             Dictionary of worker groups keyed by prefix
         """
         if self.fused_worker_used:
-            return self.spawn_fused(prefix_set)
+            return self.spawn_fused(prefix_set) # J：如果使用了 fused worker，则使用 fused worker 时的生成 RayWorkerGroup 实例方法
 
-        def _rebind_actor_methods(worker_group, actor_name):
-            prefix: str = actor_name + "_"
-            for method_name in dir(worker_group):
-                if method_name.startswith(prefix):
-                    original_method_name = method_name.removeprefix(prefix)
-                    method = getattr(worker_group, method_name)
-                    setattr(worker_group, original_method_name, method)
+        def _rebind_actor_methods(worker_group, actor_name): # J: 重新绑定 Ray Actor 实例的方法，仅暴露指定的 prefix 开头的方法，且将方法名中的前缀替换为原始方法名
+            prefix: str = actor_name + "_" # J: 构建方法名的前缀，格式为 actor_name_，如 "critic_"
+            for method_name in dir(worker_group): # J：遍历 RayWorkerGroup 实例的所有方法名
+                if method_name.startswith(prefix): # J：仅暴露指定的 prefix 开头的方法
+                    original_method_name = method_name.removeprefix(prefix) # J: 移除方法名中的前缀，得到剔除前缀后的原始方法名
+                    method = getattr(worker_group, method_name) # J: 获取当前方法的实例
+                    setattr(worker_group, original_method_name, method) # J: 将当前方法的实例添加到 RayWorkerGroup 实例中，键为剔除前缀后的原始方法名
 
         new_worker_group_dict = {}
         for prefix in prefix_set:
-            new_worker_group = self.from_detached(
+            # J：为每个 prefix 创建一个 RayWorkerGroup 对象
+            new_worker_group = self.from_detached( # J: 重新创建一个 RayWorkerGroup 实例，但复用之前已经构造的 Workers
                 name_prefix=self.name_prefix,
-                worker_names=self._worker_names,
-                worker_handles=self._workers,
-                ray_cls_with_init=self.ray_cls_with_init,
+                worker_names=self._worker_names, # J: 从 Workers 中获取工作进程的名称（已创建）
+                worker_handles=self._workers, # J: 从 Workers 中获取工作进程的句柄（Ray Actor 实例）
+                ray_cls_with_init=self.ray_cls_with_init, # J：这里 ray_cls_with_init 是 RayClassWithInitArgs 类对象，封装了 WorkerDict 类（一个 @ray.remote 封装过的，Worker 的子类）
+                                                          # J：WorkerDict 对象的 self.worker_dict 属性是一个字典，键为角色名，值为角色的 Ray Actor 类普通实例
+                                                          # J：这里 ray_cls_with_init 的 生成详情见 create_colocated_worker_cls
                 profile_steps=self.profile_steps,
                 worker_nsight_options=self.worker_nsight_options,
             )
 
-            _rebind_actor_methods(new_worker_group, prefix)
-            new_worker_group_dict[prefix] = new_worker_group
-        return new_worker_group_dict
+            _rebind_actor_methods(new_worker_group, prefix) # J: 重新绑定 Ray Actor 实例的方法，将方法名中的前缀替换为原始方法名
+            new_worker_group_dict[prefix] = new_worker_group # J: 将新创建的 RayWorkerGroup 对象添加到字典中，键为 prefix，值为 RayWorkerGroup 对象
+        return new_worker_group_dict # 返回的字典，键为 prefix，值为 RayWorkerGroup 对象
 
-    def spawn_fused(self, prefix_set):
+    def spawn_fused(self, prefix_set): # J：使用 fused worker 时的生成 RayWorkerGroup 实例方法
         """Create a dictionary of worker groups for fused workers.
 
         Args:
@@ -789,12 +798,12 @@ class RayWorkerGroup(WorkerGroup): # J: Ray 工作进程组类，用于管理 Ra
             Dictionary of worker groups keyed by prefix
         """
         wg_dict = dict()
-        for key in prefix_set:
-            new_wg = deepcopy(self)
-            new_wg._bind_worker_method(self.ray_cls_with_init.cls.raw_cls_dict[key], func_generator)
-            new_wg.sub_cls_name = key
-            wg_dict[key] = new_wg
-        return wg_dict
+        for key in prefix_set: # J：遍历 prefix_set 中的每个 prefix
+            new_wg = deepcopy(self) # J: 深拷贝当前 RayWorkerGroup 实例，创建一个新的 RayWorkerGroup 实例
+            new_wg._bind_worker_method(self.ray_cls_with_init.cls.raw_cls_dict[key], func_generator) # J: 仅绑定 key 对应的 Ray Actor 实例的方法，并将方法名中的前缀替换为原始方法名
+            new_wg.sub_cls_name = key # J: 设置新创建的 RayWorkerGroup 实例的 sub_cls_name 属性为当前 prefix
+            wg_dict[key] = new_wg # J: 将新创建的 RayWorkerGroup 实例添加到字典中，键为 prefix，值为 RayWorkerGroup 实例
+        return wg_dict # 返回的字典，键为 prefix，值为 RayWorkerGroup 实例
 
     def fuse(self, prefix_set):
         """Fuse multiple worker groups into the current worker group.
@@ -808,7 +817,7 @@ class RayWorkerGroup(WorkerGroup): # J: Ray 工作进程组类，用于管理 Ra
             setattr(self, role_name, role_wg)
         self.method_names = self._bind_worker_method(self.ray_cls_with_init.cls, func_generator)
 
-    def _execute_remote_single_worker(self, worker, method_name: str, *args, **kwargs):
+    def _execute_remote_single_worker(self, worker, method_name: str, *args, **kwargs): # J：执行单个 worker 上的方法
         """Execute a method on a single worker remotely.
 
         Args:
@@ -821,11 +830,13 @@ class RayWorkerGroup(WorkerGroup): # J: Ray 工作进程组类，用于管理 Ra
             Remote object reference to the method execution
         """
         if self.fused_worker_used and method_name not in self.method_names:
+            # J：如果使用 fused worker 且当前方法名不在 self.method_names 中，说明是 fused worker 上的方法
+            # J：调用 fused worker 上的方法，将方法名前缀添加为 _fwmn_
             remote_call = getattr(worker, self.fused_worker_execute_fn_name)
-            return remote_call.remote(f"{self.sub_cls_name}_fwmn_{method_name}", *args, **kwargs)
+            return remote_call.remote(f"{self.sub_cls_name}_fwmn_{method_name}", *args, **kwargs) # J：返回远程对象引用，用于后续获取执行结果
         # fused worker not used
         remote_call = getattr(worker, method_name)
-        return remote_call.remote(*args, **kwargs)
+        return remote_call.remote(*args, **kwargs) # J：返回远程对象引用，用于后续获取执行结果
 
     def execute_rank_zero_sync(self, method_name: str, *args, **kwargs):
         """Execute a method on rank zero worker synchronously.
@@ -866,7 +877,8 @@ class RayWorkerGroup(WorkerGroup): # J: Ray 工作进程组类，用于管理 Ra
         """
         return self.execute_rank_zero_async(method_name, *args, **kwargs)
 
-    def execute_all(self, method_name: str, *args, **kwargs):
+    def execute_all(self, method_name: str, *args, **kwargs): # J：执行所有 worker 上的方法，返回远程对象引用列表
+                                                              # J：这个函数被绑定到了 Execute.ALL 上 (详情看 verl.single_controller.base.decorator.get_predefined_execute_fn)
         """Alias for execute_all_async.
 
         Args:
@@ -877,7 +889,7 @@ class RayWorkerGroup(WorkerGroup): # J: Ray 工作进程组类，用于管理 Ra
         Returns:
             List of remote object references to the method executions
         """
-        return self.execute_all_async(method_name, *args, **kwargs)
+        return self.execute_all_async(method_name, *args, **kwargs) # J：返回异步执行结果的远程对象引用列表
 
     def execute_all_sync(self, method_name: str, *args, **kwargs):
         """Execute a method on all workers synchronously.
@@ -892,7 +904,7 @@ class RayWorkerGroup(WorkerGroup): # J: Ray 工作进程组类，用于管理 Ra
         """
         return ray.get(self.execute_all_async(method_name, *args, **kwargs))
 
-    def execute_all_async(self, method_name: str, *args, **kwargs):
+    def execute_all_async(self, method_name: str, *args, **kwargs): # J：异步执行所有 worker 上的方法
         """Execute a method on all workers asynchronously.
 
         Args:
@@ -907,19 +919,24 @@ class RayWorkerGroup(WorkerGroup): # J: Ray 工作进程组类，用于管理 Ra
         # and their lengths match len(self._workers), we'll distribute each
         # element in these lists to the corresponding worker
         # print(f"execute_all_async: method {method_name}({args}, {kwargs})")
-        length = len(self._workers)
+        length = len(self._workers) # J：获取 worker 数量
+        # J：如果所有参数都是列表，且列表的长度都等于 worker 数量
+        # J：说明每个参数对应一个 worker，则将参数分片给每个 worker
         if all(isinstance(arg, list) for arg in args) and all(isinstance(kwarg, list) for kwarg in kwargs.values()):
             if all(len(arg) == length for arg in args) and all(len(kwarg) == length for kwarg in kwargs.values()):
                 # print(f"splitting args and kwargs into {length} shards")
                 result = []
-                for i in range(length):
-                    sliced_args = tuple(arg[i] for arg in args)
-                    sliced_kwargs = {k: v[i] for k, v in kwargs.items()}
+                for i in range(length): # J：遍历每个 worker
+                    sliced_args = tuple(arg[i] for arg in args) # J：获取每个 worker 对应的位置参数
+                    sliced_kwargs = {k: v[i] for k, v in kwargs.items()} # J：获取每个 worker 对应的关键词参数
                     result.append(
+                        # J：执行每个 worker 上的方法
                         self._execute_remote_single_worker(self._workers[i], method_name, *sliced_args, **sliced_kwargs)
                     )
                 return result
 
+        # J：如果参数不是列表，或者列表的长度不等于 worker 数量
+        # J：说明参数对应对应所有 worker，则直接执行每个 worker 上的方法
         return [self._execute_remote_single_worker(worker, method_name, *args, **kwargs) for worker in self._workers]
 
     @property
@@ -999,7 +1016,7 @@ def _bind_workers_method_to_parent(cls, key, user_defined_cls): # J：很好的�
                     setattr(cls, method_name, func) # J：将包装函数绑定到 cls 类，方法名不包含角色名
                     print(f"bind role {key} method {method_name} to class {cls}") # J：打印绑定信息
                 else:
-                    method_name_with_prefix = key + "_" + method_name # J：方法名前加上 角色名 为前缀
+                    method_name_with_prefix = key + "_" + method_name # J：方法名前加上 角色名（key 是角色名） 为前缀
                     setattr(cls, method_name_with_prefix, func) # J：将包装函数绑定到 cls 类，方法名前缀为角色名
                     # J：忘记打印绑定信息了
             except Exception as e:
@@ -1060,18 +1077,20 @@ def create_colocated_worker_cls(class_dict: dict[str, RayClassWithInitArgs]): # 
                 # in worker class, e.g. <verl.single_controller.base.worker.Worker>
                 # when DISABLE_WORKER_INIT == 1 it will return immediately
                 with temp_env_var("DISABLE_WORKER_INIT", "1"): # J：跳过这个等待 Head 服务就绪的初始化，立即返回普通类的实例化
+                    # J：理解，每个 WorkerDict 实例都有一个 self.worker_dict 属性，用于存储每个角色的 普通类（解除 @ray.remote 装饰）的实例
                     self.worker_dict[key] = user_defined_cls( # J：普通类的实例化，注意 DISABLE_WORKER_INIT=1 使得不用等待 Head 服务就绪
                         *init_args_dict[key].get("args", ()), **init_args_dict[key].get("kwargs", {})
                     )
 
+    # J：绑定每个角色的 Ray Actor 类方法到 WorkerDict 类，key 是角色名，此后 WorkerDict 实例的函数调用会委托给对应的 self.worker_dict[key]（即每个角色的普通类（解除 @ray.remote 装饰）的实例，而不是 Ray Actor 类实例）
     # now monkey-patch the methods from inner class to WorkerDict
     for key, user_defined_cls in cls_dict.items(): # J：cls_dict 是一个 dict 对象（键 是[str(角色)]，值是 Ray Actor 类 类）
         user_defined_cls = _unwrap_ray_remote(user_defined_cls) # J：解除 @ray.remote 装饰，不再是 Ray Actor 类，是普通类
-        _bind_workers_method_to_parent(WorkerDict, key, user_defined_cls) # J：绑定 user_defined_cls 类方法到 cls 类，key 是角色名
+        _bind_workers_method_to_parent(WorkerDict, key, user_defined_cls) # J：绑定 user_defined_cls 类方法到 WorkerDict 类，key 是角色名
 
     remote_cls = ray.remote(WorkerDict) # J：将 WorkerDict 类注册为 Ray Actor 类
     remote_cls = RayClassWithInitArgs(cls=remote_cls) # J：将 WorkerDict 类注册为 RayClassWithInitArgs 类，后续延迟实例化
-    return remote_cls # J：返回 封装了 WorkerDict 类的 RayClassWithInitArgs 类对象
+    return remote_cls # J：返回 封装了 WorkerDict 类的 RayClassWithInitArgs 类对象, WorkerDict 对象的 self.worker_dict 属性 是一个字典，键为角色名，值为角色的 Ray Actor 类普通实例
 
 
 FusedWorkerCLSName = "FusedWorker"

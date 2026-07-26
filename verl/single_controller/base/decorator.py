@@ -116,8 +116,8 @@ def _split_args_kwargs_data_proto_with_auto_padding(chunks, *args, **kwargs):
 
     return splitted_args, splitted_kwargs
 
-
-def dispatch_one_to_all(worker_group, *args, **kwargs):
+# J：会被 register dispatch_mode 注册为预定义的分发模式并被调用
+def dispatch_one_to_all(worker_group, *args, **kwargs): # J：将参数复制到所有 rank，每个 rank 都执行相同的参数
     args = tuple([arg] * worker_group.world_size for arg in args)
     kwargs = {k: [v] * worker_group.world_size for k, v in kwargs.items()}
     return args, kwargs
@@ -131,7 +131,7 @@ def dispatch_all_to_all(worker_group, *args, **kwargs):
     return args, kwargs
 
 
-def collect_all_to_all(worker_group, output):
+def collect_all_to_all(worker_group, output): # J：不做任何处理，直接返回输出
     return output
 
 
@@ -308,7 +308,7 @@ def make_nd_compute_dataproto_dispatch_fn(mesh_name):
 DISPATCH_MODE_FN_REGISTRY = { # J：全局注册分发模式的字典，键为分发模式，值为分发函数字典
     Dispatch.ONE_TO_ALL: {
         "dispatch_fn": dispatch_one_to_all,
-        "collect_fn": collect_all_to_all,
+        "collect_fn": collect_all_to_all, # J：收集所有 dp_rank 的输出，注意这里没有写错！就是要收集所有 dp_rank 的输出
     },
     Dispatch.ALL_TO_ALL: {
         "dispatch_fn": dispatch_all_to_all,
@@ -332,7 +332,7 @@ DISPATCH_MODE_FN_REGISTRY = { # J：全局注册分发模式的字典，键为�
 
 
 def get_predefined_dispatch_fn(dispatch_mode): # J：根据预定义的分发模式获取分发函数字典
-    return DISPATCH_MODE_FN_REGISTRY[dispatch_mode]
+    return DISPATCH_MODE_FN_REGISTRY[dispatch_mode] # J：返回一个 dict，键为函数名称，值为函数对象
 
 
 def register_dispatch_mode(dispatch_mode_name, dispatch_fn, collect_fn):
@@ -353,17 +353,16 @@ def update_dispatch_mode(dispatch_mode, dispatch_fn, collect_fn):
     assert dispatch_mode in DISPATCH_MODE_FN_REGISTRY, f"dispatch_mode {dispatch_mode} not found"
     DISPATCH_MODE_FN_REGISTRY[dispatch_mode] = {"dispatch_fn": dispatch_fn, "collect_fn": collect_fn}
 
-
-def get_predefined_execute_fn(execute_mode):
+def get_predefined_execute_fn(execute_mode): # J：根据预定义的执行模式获取执行函数字典
     """
     Note that here we only asks execute_all and execute_rank_zero to be implemented
     Leave the choice of how these two functions handle argument 'blocking' to users
     """
     predefined_execute_mode_fn = {
-        Execute.ALL: {"execute_fn_name": "execute_all"},
-        Execute.RANK_ZERO: {"execute_fn_name": "execute_rank_zero"},
+        Execute.ALL: {"execute_fn_name": "execute_all"}, # J：执行所有 worker 上的方法
+        Execute.RANK_ZERO: {"execute_fn_name": "execute_rank_zero"}, # J：执行 rank 为 0 的 worker 上的方法
     }
-    return predefined_execute_mode_fn[execute_mode]
+    return predefined_execute_mode_fn[execute_mode] # J：返回执行函数字典，键为执行模式，值为执行函数名称
 
 
 def _check_dispatch_mode(dispatch_mode):

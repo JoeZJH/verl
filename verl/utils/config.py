@@ -20,7 +20,7 @@ from omegaconf import DictConfig, ListConfig, OmegaConf
 __all__ = ["omega_conf_to_dataclass", "validate_config"]
 
 
-def omega_conf_to_dataclass(config: DictConfig | dict, dataclass_type: Optional[type[Any]] = None) -> Any:
+def omega_conf_to_dataclass(config: DictConfig | dict, dataclass_type: Optional[type[Any]] = None) -> Any: # J：将 OmegaConf 配置转换为数据class 对象
     """
     Convert an OmegaConf DictConfig to a dataclass.
 
@@ -40,7 +40,7 @@ def omega_conf_to_dataclass(config: DictConfig | dict, dataclass_type: Optional[
         return config
 
     if dataclass_type is None:
-        assert "_target_" in config, (
+        assert "_target_" in config, ( # J：当 dataclass_type 未提供时，config 必须包含 _target_ 参数
             "When dataclass_type is not provided, config must contain _target_. "
             "See trainer/config/ppo_trainer.yaml algorithm section for an example. "
             f"Got config: {config}"

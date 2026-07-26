@@ -180,7 +180,7 @@ class Tracking:
         if "file" in default_backend:
             self.logger["file"] = FileLogger(project_name, experiment_name)
 
-    def log(self, data, step, backend=None):
+    def log(self, data, step, backend=None): # J：日志记录函数，将数据记录到不同的后端
         for default_backend, logger_instance in self.logger.items():
             if backend is None or default_backend in backend:
                 logger_instance.log(data=data, step=step)

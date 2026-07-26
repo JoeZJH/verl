@@ -106,7 +106,7 @@ def unpad_dataproto(data: "DataProto", pad_size):
     return data
 
 
-def union_tensor_dict(tensor_dict1: TensorDict, tensor_dict2: TensorDict) -> TensorDict:
+def union_tensor_dict(tensor_dict1: TensorDict, tensor_dict2: TensorDict) -> TensorDict: # J：合并两个 TensorDict 对象（将 tensor_dict2 合并到 tensor_dict1 中并返回 tensor_dict1），不能有重复的 key
     """Union two tensordicts."""
     assert tensor_dict1.batch_size == tensor_dict2.batch_size, (
         f"Two tensor dict must have identical batch size. Got {tensor_dict1.batch_size} and {tensor_dict2.batch_size}"
@@ -185,7 +185,7 @@ def _deep_equal(a: Any, b: Any, visited: set[int]) -> bool:
     return result
 
 
-def union_numpy_dict(tensor_dict1: dict[str, np.ndarray], tensor_dict2: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+def union_numpy_dict(tensor_dict1: dict[str, np.ndarray], tensor_dict2: dict[str, np.ndarray]) -> dict[str, np.ndarray]: # J：合并两个 numpy 数组字典（将 tensor_dict2 合并到 tensor_dict1 中并返回 tensor_dict1），如果 key 相同，则 value 必须相同
     for key, val in tensor_dict2.items():
         if key in tensor_dict1:
             assert isinstance(tensor_dict2[key], np.ndarray)
@@ -315,7 +315,7 @@ class DataProtoItem:
 
 
 @dataclass
-class DataProto:
+class DataProto: # J：核心数据结构
     """
     A DataProto is a data structure that aims to provide a standard protocol for data exchange between functions.
     It contains a batch (TensorDict) and a meta_info (Dict). The batch is a TensorDict https://pytorch.org/tensordict/.
@@ -323,9 +323,9 @@ class DataProto:
     same batch size should be put inside batch.
     """
 
-    batch: TensorDict = None
-    non_tensor_batch: dict = field(default_factory=dict)
-    meta_info: dict = field(default_factory=dict)
+    batch: TensorDict = None # J：包含样本数据的 TensorDict 实例
+    non_tensor_batch: dict = field(default_factory=dict) # J：包含非张量数据的字典，如奖励、动作等，与 batch 中的 tensor 一一对应
+    meta_info: dict = field(default_factory=dict) # J：包含元数据的字典，如环境信息、超参数等，与样本数据量无关
 
     def __post_init__(self):
         # perform necessary checking
@@ -718,6 +718,7 @@ class DataProto:
         # Return a new DataProto object
         return type(self)(batch=sliced_batch, non_tensor_batch=sliced_non_tensor, meta_info=self.meta_info)
 
+    # J：删除指定集合并返回为新的 DataProto 对象，包含 poped 的 batch_keys 和 meta_info_keys
     def pop(self, batch_keys=None, non_tensor_batch_keys=None, meta_info_keys=None) -> "DataProto":
         """Pop a subset of the DataProto via `batch_keys` and `meta_info_keys`
 
@@ -778,7 +779,7 @@ class DataProto:
 
         return self
 
-    def union(self, other: "DataProto") -> "DataProto":
+    def union(self, other: "DataProto") -> "DataProto": # J：合并两个 DataProto 对象，分别合并 batch non_tensor_batch 和 meta_info 字段等
         """Union with another DataProto. Union batch and meta_info separately.
         Throw an error if
 
@@ -792,9 +793,9 @@ class DataProto:
         Returns:
             DataProto: the DataProto after union
         """
-        self.batch = union_tensor_dict(self.batch, other.batch)
-        self.non_tensor_batch = union_numpy_dict(self.non_tensor_batch, other.non_tensor_batch)
-        self.meta_info = union_two_dict(self.meta_info, other.meta_info)
+        self.batch = union_tensor_dict(self.batch, other.batch) # J：合并两个 TensorDict 对象（将 other.batch 合并到 self.batch 中并返回 self.batch），不能有重复的 key
+        self.non_tensor_batch = union_numpy_dict(self.non_tensor_batch, other.non_tensor_batch) # J：合并两个 numpy 数组字典（将 other.non_tensor_batch 合并到 self.non_tensor_batch 中并返回 self.non_tensor_batch），如果 key 相同，则 value 必须相同
+        self.meta_info = union_two_dict(self.meta_info, other.meta_info) # J：合并两个字典（将 other.meta_info 合并到 self.meta_info 中并返回 self.meta_info），如果 key 相同，则 value 必须相同
         return self
 
     def make_iterator(self, mini_batch_size, epochs, seed=None, dataloader_kwargs=None):
@@ -914,7 +915,7 @@ class DataProto:
         return [self[i : i + split_size] for i in range(0, len(self), split_size)]
 
     @staticmethod
-    def concat(data: list["DataProto"]) -> "DataProto":
+    def concat(data: list["DataProto"]) -> "DataProto": # J：合并多个 DataProto 实例
         """Concat a list of DataProto. The batch is concatenated among dim=0.
         The meta_info is merged, with special handling for metrics from different workers.
 
@@ -968,7 +969,7 @@ class DataProto:
         self.batch = self.batch[indices]
         self.non_tensor_batch = {key: val[indices_np] for key, val in self.non_tensor_batch.items()}
 
-    def repeat(self, repeat_times=2, interleave=True):
+    def repeat(self, repeat_times=2, interleave=True): # J：TODO：重复 DataProto 实例中的 batch 数据
         """
         Repeat the batch data a specified number of times.
 
@@ -982,18 +983,18 @@ class DataProto:
         if self.batch is not None:
             if interleave:
                 # Interleave the data
-                repeated_tensors = {
+                repeated_tensors = { # J：针对 batch 中的每个 tensor 进行重复，repeat_interleave 会逐元素重复
                     key: tensor.repeat_interleave(repeat_times, dim=0) for key, tensor in self.batch.items()
                 }
             else:
                 # Stack the data
-                repeated_tensors = {
+                repeated_tensors = { # J：针对 batch 中的每个 tensor 进行重复，整个 batch 重复
                     key: tensor.unsqueeze(0).expand(repeat_times, *tensor.shape).reshape(-1, *tensor.shape[1:])
                     for key, tensor in self.batch.items()
                 }
 
-            repeated_batch = TensorDict(
-                source=repeated_tensors,
+            repeated_batch = TensorDict( # J：基于重复后的 batch 数据创建新的 TensorDict 实例
+                source=repeated_tensors, # J：重复后的 batch 数据
                 batch_size=(self.batch.batch_size[0] * repeat_times,),
             )
         else:
@@ -1006,10 +1007,10 @@ class DataProto:
             else:
                 repeated_non_tensor_batch[key] = np.tile(val, (repeat_times,) + (1,) * (val.ndim - 1))
 
-        return type(self)(
+        return type(self)( # J：创建新的 DataProto 实例，包含重复后的 batch 数据和 non_tensor_batch
             batch=repeated_batch,
             non_tensor_batch=repeated_non_tensor_batch,
-            meta_info=self.meta_info,
+            meta_info=self.meta_info, # J：meta_info 不用进行重复，与样本数据无关
         )
 
     def unfold_column_chunks(self, n_split: int, split_keys: Optional[list[str]] = None):

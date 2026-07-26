@@ -374,7 +374,7 @@ class CheckpointEngineManager:
     def __init__(
         self,
         config: CheckpointEngineConfig,
-        trainer: RayWorkerGroup,
+        trainer: RayWorkerGroup, # J：actor_rollout_wg
         replicas: list[RolloutReplica],
     ) -> None:
         self.config = config
@@ -467,7 +467,7 @@ class CheckpointEngineManager:
         await asyncio.gather(*[r.resume_kv_cache() for r in self.replicas])
 
     @auto_await
-    async def update_weights(self, global_steps: int = None):
+    async def update_weights(self, global_steps: int = None): # J：更新 trainer 权重到 rollout replicas
         """Update weights from trainer to rollout replicas.
 
         Args:
@@ -486,8 +486,9 @@ class CheckpointEngineManager:
         workers = []
         for replica in self.replicas:
             workers.extend(replica.workers)
+        # J：_worker_cls 是 ay.remote(CheckpointEngineWorker) ，rollout 是一个 RayWorkerGroup，持有的 worker 是 CheckpointEngineWorker 类型
         rollout = RayWorkerGroup(worker_handles=workers, ray_cls_with_init=RayClassWithInitArgs(cls=_worker_cls))
-        trainer = self.trainer
+        trainer = self.trainer # J：actor_rollout_wg
 
         # 3. release kv_cache before weight sync (weights stay in place)
         await self.release_kv_cache_replicas()
@@ -496,7 +497,19 @@ class CheckpointEngineManager:
         self.build_process_group(rollout)
 
         # 5. update weights of all workers
+        # 
         ray.get(
+            # J：这段代码中 `+` 的含义是 Python 列表的拼接操作，本质是合并两个 `ray.ObjectRef` 列表
+            # J：真实调用的是 execute_all 函数，由于 `blocking=False`，`ray.get()` 不会在包装函数内执行，而是返回一个 `ray.ObjectRef` 列表
+            # J：理解：`update_weights` 方法在底层 Worker 类上被 `@register(dispatch_mode=Dispatch.ONE_TO_ALL, blocking=False)` 装饰，这意味着 `RayWorkerGroup` 会通过 `func_generator` 动态生成一个包装函数
+                # * 在 `func_generator` 中，调用流程为：
+                # * `dispatch_fn` → `dispatch_one_to_all`（透传参数）
+                # * `execute_fn` → `execute_all` → `execute_all_async`
+                # * `execute_all_async` 内部为每个 worker 调用 `_execute_remote_single_worker`，该方法返回 **`remote_call.remote(...)`**，即 **`ray.ObjectRef`**
+                # * 最终返回 `[ray.ObjectRef, ray.ObjectRef, ...]` — 一个 `ray.ObjectRef` 列表
+                # * 由于 `blocking=False`，`ray.get()` 不会在包装函数内执行
+                # * `collect_fn` → `collect_all_to_all`，直接透传返回（仍然是一个列表）
+            # J：**用一个 `ray.get()` 同时等待 trainer 和 rollout 两边所有 worker 的 `update_weights` 异步调用全部完成**，实现两边的同步 barrier
             trainer.update_weights(global_steps=global_steps, mode=self.backend)
             + rollout.update_weights(global_steps=global_steps)
         )

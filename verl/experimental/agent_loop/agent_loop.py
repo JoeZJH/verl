@@ -1041,7 +1041,7 @@ async def get_trajectory_info(step, index, validate):
     return trajectory_info
 
 
-class AgentLoopManager:
+class AgentLoopManager: # J：默认用于管理 AgentLoop 工作进程的类
     """Agent loop manager that manages a group of agent loop workers.
 
     Args:
@@ -1115,7 +1115,7 @@ class AgentLoopManager:
                 for worker, chunk in zip(self.agent_loop_workers, chunkes, strict=True)
             ]
         )
-        output = DataProto.concat(outputs)
+        output = DataProto.concat(outputs) # J：staticmethod 方法，负责合并多个 DataProto 实例
 
         # calculate performance metrics
         metrics = [output.meta_info.pop("metrics") for output in outputs]  # List[List[Dict[str, str]]]

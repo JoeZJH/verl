@@ -115,7 +115,7 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.AdaptiveKLController, 
     return data, metrics
 
 
-def compute_response_mask(data: DataProto):
+def compute_response_mask(data: DataProto): # J：计算 Response 部分的注意力掩码
     """Compute the attention mask for the response part of the sequence.
 
     This function extracts the portion of the attention mask that corresponds to the model's response,
@@ -128,9 +128,9 @@ def compute_response_mask(data: DataProto):
         torch.Tensor: The attention mask for the response tokens.
     """
     responses = data.batch["responses"]
-    response_length = responses.size(1)
+    response_length = responses.size(1) # J：responses.size(1) 是 padding 后的最大长度 ，不是每个 response 的真实长度
     attention_mask = data.batch["attention_mask"]
-    return attention_mask[:, -response_length:]
+    return attention_mask[:, -response_length:] # J：仅返回 Response 部分的注意力掩码
 
 
 def compute_spec_decode_metrics(
@@ -596,12 +596,14 @@ class RayPPOTrainer:
 
         return gen_batch
 
-    def _compute_reward_colocate(self, batch: DataProto) -> tuple[torch.Tensor, dict[str, Any]] | torch.Tensor:
+    def _compute_reward_colocate(self, batch: DataProto) -> tuple[torch.Tensor, dict[str, Any]] | torch.Tensor: # J：计算 reward score 并返回包含 rm_scores 张量和 reward_extra_info 字段的 DataProto 对象
+        # J：问题：reward_loop_manager.compute_rm_score(batch) 返回的是一个 DataProto 对象，这里写错 为 tuple[torch.Tensor, dict[str, Any]] | torch.Tensor 了
         """
         compute reward use colocate reward model
         """
         assert self.reward_loop_manager is not None, "RewardLoopManager is None"
-        batch_reward = self.reward_loop_manager.compute_rm_score(batch)
+        batch_reward = self.reward_loop_manager.compute_rm_score(batch)  # J：计算 reward score 并返回包含 rm_scores 张量和 reward_extra_info 字段的 DataProto 对象
+        print(f"batch_reward: {batch_reward}")
         return batch_reward
 
     def _validate(self, merged: bool = False):
@@ -817,7 +819,8 @@ class RayPPOTrainer:
 
             from verl.workers.config import CriticConfig
 
-            critic_cfg: CriticConfig = omega_conf_to_dataclass(self.config.critic) # J：将 OmegaConf 配置转换为数据class 对象
+            # J：将 OmegaConf 配置转换为数据 class 对象
+            critic_cfg: CriticConfig = omega_conf_to_dataclass(self.config.critic) # J：将 OmegaConf 配置转换为数据 class 对象（返回对象为 _target_ 参数指定数据 class 类型）
 
             # convert critic_cfg into TrainingWorkerConfig for the unified model engine worker
             from verl.workers.engine_workers import TrainingWorkerConfig
@@ -882,42 +885,51 @@ class RayPPOTrainer:
         for resource_pool, class_dict in self.resource_pool_to_cls.items(): # J：遍历资源池字典，每个资源池包含多个角色的 Ray Actor 类包装器对象
             if not class_dict: # J：class_dict 是一个 dict 对象（键 是[str(角色)]，值是 RayClassWithInitArgs 对象）
                 continue
-            # J：为每个资源池创建一个 RayWorkerGroup 对象
             # J：create_colocated_worker_cls 返回封装了 WorkerDict 类（一个 @ray.remote 封装过的，Worker 的子类）的 RayClassWithInitArgs 类对象
             # J：WorkerDict 内部 worker_dict 属性持有多个角色的 Actor 类的 去除 @ray.remote 装饰器后的类对象（普通对象）
-            worker_dict_cls = create_colocated_worker_cls(class_dict=class_dict)
-            wg_dict = self.ray_worker_group_cls( # J: 每个资源池创建一个 RayWorkerGroup 对象
+            worker_dict_cls = create_colocated_worker_cls(class_dict=class_dict) # J：返回 RayClassWithInitArgs 类对象，持有 WorkerDict 类
+            
+            # J：为每个资源池创建一个 RayWorkerGroup 对象
+            wg_dict = self.ray_worker_group_cls( # J：每个资源池创建一个 RayWorkerGroup 对象（ray_worker_group_cls = RayWorkerGroup）
                 resource_pool=resource_pool,
-                ray_cls_with_init=worker_dict_cls,
+                ray_cls_with_init=worker_dict_cls, # J：封装了 WorkerDict 类的 RayClassWithInitArgs 类对象，RayWorkerGroup 会根据这个类对象在每个进程上创建 WorkerDict 类 实例
                 **wg_kwargs,
             )
-            # TOOD：
+            # J：生成一个 dict 对象（键为 prefix（即 str(角色) ），值为 RayWorkerGroup 对象，即每个角色对应的 RayWorkerGroup 实例）
+            # J：理解：生成的每个 RayWorkerGroup 实例都共享相同的 Workers 的资源（不会重新创建 Worker），但每个 RayWorkerGroup 实例仅包含指定的 prefix 开头的方法，且将方法名中的前缀替换为原始方法名
             spawn_wg = wg_dict.spawn(prefix_set=class_dict.keys())
-            all_wg.update(spawn_wg)
+            all_wg.update(spawn_wg) # J：all_wg 是一个 dict 对象（键 是[str(角色)]，值是 RayWorkerGroup 对象, 这些 RayWorkerGroup 对象共享相同的 Workers 的资源（不会重新创建 Worker），但每个 RayWorkerGroup 实例仅包含指定的 prefix 开头的方法，且将方法名中的前缀替换为原始方法名）
 
         if self.use_critic:
-            self.critic_wg = all_wg[str(Role.Critic)]
-            self.critic_wg.reset()
+            self.critic_wg = all_wg[str(Role.Critic)] # J：获取 Critic 角色对应的的 RayWorkerGroup 对象
+            self.critic_wg.reset() # J：reset() 方法在 RayWorkerGroup 类中是不存在的，这里调用的是绑定在 RayWorkerGroup 实例上的 reset() 方法
+                                   # J：reset() 方法的路径是：
+                                   # J： 第一步：TrainingWorker 定义 reset() 方法，verl.workers.engine_workers.TrainingWorker.reset
+                                   # J： 第二步：worker 原生对象被 WorkerDict 对象持有并绑定 reset() 方法，调用时会委托给对应的 self.worker_dict[key]（即每个角色的普通类（解除 @ray.remote 装饰）的实例）的 reset() 方法，此时调用需要指定角色名为前缀（一个 WorkerDict 绑定了多个 Role，所以需要添加前缀区分）
+                                   # J： 第三步：WorkerDict 实例被 RayWorkerGroup 实例持有并绑定 reset() 方法，调用时会委托给对应的 self.worker_dict[key]（即每个角色的普通类（解除 @ray.remote 装饰）的实例）的 reset() 方法，此时调用依然需要指定前缀
+                                   # J： 第四步：spawn() 方法将 RayWorkerGroup 拆开成分 Role 的多个 RayWorkerGroup 实例（dict<role, RayWorkerGroup> 存储），（即每个角色对应的 RayWorkerGroup 实例），此时剔除角色名前缀，直接调用 reset() 方法即可
             # assign critic loss
             from functools import partial
 
             from verl.workers.utils.losses import value_loss
 
-            value_loss_ = partial(value_loss, config=orig_critic_cfg)
-            self.critic_wg.set_loss_fn(value_loss_)
+            value_loss_ = partial(value_loss, config=orig_critic_cfg) # J：orig_critic_cfg 是 self.config.critic 初始化的结果（CriticConfig 类型）
+            self.critic_wg.set_loss_fn(value_loss_) # J：设置损失函数计算函数（value_loss_），这里 set_loss_fn() 也是绑定得到的方法, verl.workers.engine_workers.TrainingWorker.set_loss_fn
+            # J：这里不用初始化模型？
 
         if self.use_reference_policy and not self.ref_in_actor:
             if str(Role.RefPolicy) in all_wg:
                 self.ref_policy_wg = all_wg[str(Role.RefPolicy)]
-                self.ref_policy_wg.init_model()
+                self.ref_policy_wg.init_model() # J：add_ref_policy_worker 函数已经废弃，不可能走到这里
             else:
                 # Model engine: ActorRolloutRefWorker
                 assert str(Role.ActorRolloutRef) in all_wg, f"{all_wg.keys()=}"
                 self.ref_policy_wg = all_wg[str(Role.ActorRolloutRef)]
+                # J：这里不用初始化，因为后面会为 actor 角色初始化模型
 
         # we should create rollout at the end so that vllm can have a better estimation of kv cache memory
-        self.actor_rollout_wg = all_wg[str(actor_role)]
-        self.actor_rollout_wg.init_model()
+        self.actor_rollout_wg = all_wg[str(actor_role)] # J：actor_role 是 Role.ActorRolloutRef 或 Role.ActorRollout
+        self.actor_rollout_wg.init_model() # J：@ActorRolloutRefWorker 定义 init_model() 方法，verl.workers.engine_workers.ActorRolloutRefWorker.init_model
 
         if self.ref_in_actor:
             self.ref_policy_wg = self.actor_rollout_wg
@@ -929,7 +941,7 @@ class RayPPOTrainer:
         # reward model (colocate or standalone): get resource_pool
         # no reward model: resource_pool = None
         resource_pool = self.resource_pool_manager.get_resource_pool(Role.RewardModel) if self.use_rm else None
-        self.reward_loop_manager = RewardLoopManager(
+        self.reward_loop_manager = RewardLoopManager( # J：创建 RewardLoopManager 实例
             config=self.config,
             rm_resource_pool=resource_pool,
         )
@@ -939,11 +951,11 @@ class RayPPOTrainer:
         self.async_rollout_mode = True
 
         # initialize teacher loop manager
-        if self.use_teacher_policy:
+        if self.use_teacher_policy: # J：For 蒸馏训练
             from verl.experimental.teacher_loop import MultiTeacherModelManager
 
-            teacher_resource_pool = self.resource_pool_manager.get_resource_pool(Role.TeacherModel)
-            self.teacher_model_manager = MultiTeacherModelManager(
+            teacher_resource_pool = self.resource_pool_manager.get_resource_pool(Role.TeacherModel) # J：获取 TeacherModel 角色对应的的资源池（RayResourcePool）
+            self.teacher_model_manager = MultiTeacherModelManager( # J：创建 MultiTeacherModelManager 实例
                 config=self.config,
                 resource_pool=teacher_resource_pool,
             )
@@ -953,18 +965,23 @@ class RayPPOTrainer:
             self.distillation_config = None
 
         # Support custom AgentLoopManager via config
+        # J：fqn 是 fully qualified name 的简称，例如 "verl.experimental.agent_loop.agent_loop.AgentLoopManager"
         manager_class_fqn = self.config.actor_rollout_ref.rollout.get("agent", {}).get("agent_loop_manager_class")
         if manager_class_fqn:
-            AgentLoopManager = load_class_from_fqn(manager_class_fqn, "AgentLoopManager")
+            AgentLoopManager = load_class_from_fqn(manager_class_fqn, "AgentLoopManager") # J：根据 fqn 加载自定义的 AgentLoopManager 实现，返回一个类 Type，并复制给 AgentLoopManager
         else:
-            from verl.experimental.agent_loop import AgentLoopManager
+            from verl.experimental.agent_loop import AgentLoopManager # J：默认使用 AgentLoopManager 实现
 
         # infrastructure overview: https://verl.readthedocs.io/en/latest/advance/reward_loop.html#architecture-design
         # agent_reward_loop: streaming reward computation with actor rollout
         # two conditions satisfied: (1) no reward model, or (2) reward model with extra resource pool
+        # J：enable_agent_reward_loop 用于判断是否直接在 Loop 中流式计算奖励，还是通过 RewardLoopManager 来计算奖励
+        # J：如果没启用 RM，奖励计算由 Agent Loop 内部直接处理（比如 rule-based reward，通过 Python 函数计算）。这时不存在资源竞争，自然可以直接流式计算，不需要复杂的协调机制
+        # J：即使有 RM，但如果它被分配了 独立的 GPU 资源池 ，那么 RM 可以独立运行，一边 Actor 做 rollout，一边 RM 在另一个资源池上并行计算奖励，结果通过流式（streaming）方式返回，互不阻塞
+        # J：最后：如果 self.use_rm = True 且 enable_resource_pool = False ，说明 RM 和 Actor/Rollout 共享计算资源 。此时不能直接流式计算，因为奖励计算会占用主流程的资源，需要通过 RewardLoopManager 来协调调度，避免资源冲突
         enable_agent_reward_loop = not self.use_rm or self.config.reward.reward_model.enable_resource_pool
 
-        self.llm_server_manager = LLMServerManager.create(
+        self.llm_server_manager = LLMServerManager.create( # J：创建 LLMServerManager 实例
             config=self.config, worker_group=self.actor_rollout_wg, rollout_resource_pool=actor_rollout_resource_pool
         )
 
@@ -972,11 +989,12 @@ class RayPPOTrainer:
         # to stream reward computation with actor rollout
         # To stream teacher computation with actor rollout, we instead pass the full manager so that the
         # teacher loop workers can sleep/wake together with rollout workers
+        # J：如果 enable_agent_reward_loop 为 True，直接将 reward_loop_workers 传递给 AgentLoopManager，因为在 AgentLoopManager 中会使用这些 worker 来流式计算奖励，否则传递 None
         reward_loop_worker_handles = self.reward_loop_manager.reward_loop_workers if enable_agent_reward_loop else None
-        self.async_rollout_manager = AgentLoopManager.create(
+        self.async_rollout_manager = AgentLoopManager.create( # J：创建 AgentLoopManager 实例
             config=self.config,
-            llm_client=self.llm_server_manager.get_client(),
-            teacher_client=self.teacher_model_manager.get_client() if self.use_teacher_policy else None,
+            llm_client=self.llm_server_manager.get_client(), # J：获取 LLMServerManager 实例的 client
+            teacher_client=self.teacher_model_manager.get_client() if self.use_teacher_policy else None, # J：For MOPD
             reward_loop_worker_handles=reward_loop_worker_handles,
         )
 
@@ -987,7 +1005,8 @@ class RayPPOTrainer:
             CheckpointEngineManager = load_class_from_fqn(checkpoint_manager_class_fqn, "CheckpointEngineManager")
         else:
             from verl.checkpoint_engine import CheckpointEngineManager
-        self.checkpoint_manager = CheckpointEngineManager(
+        # J：TODO：CheckpointEngineManager 中许多函数还需要阅读
+        self.checkpoint_manager = CheckpointEngineManager( # J：创建 CheckpointEngineManager 实例，负责同步权重等
             config=checkpoint_engine_config,
             trainer=self.actor_rollout_wg,
             replicas=self.llm_server_manager.get_replicas(),
@@ -1408,7 +1427,7 @@ class RayPPOTrainer:
         self.global_steps = 0
 
         # load checkpoint and update weights before doing anything
-        self._load_checkpoint()
+        self._load_checkpoint() # J：加载检查点会修改 global_steps 为检查点中的 global_steps
         self.checkpoint_manager.update_weights(self.global_steps)
 
         current_epoch = self.global_steps // len(self.train_dataloader)
@@ -1444,8 +1463,8 @@ class RayPPOTrainer:
         )
         next_step_profile = False
 
-        for epoch in range(current_epoch, self.config.trainer.total_epochs):
-            for batch_dict in self.train_dataloader:
+        for epoch in range(current_epoch, self.config.trainer.total_epochs): # J：遍历训练轮数
+            for batch_dict in self.train_dataloader: # J：遍历训练数据集
                 if hasattr(self.actor_rollout_wg, "async_calls_finalize_fn_exec"):
                     self.actor_rollout_wg.async_calls_finalize_fn_exec(blocking=False)
                 metrics = {}
@@ -1465,18 +1484,21 @@ class RayPPOTrainer:
                     [str(uuid.uuid4()) for _ in range(len(batch.batch))], dtype=object
                 )
 
-                gen_batch = self._get_gen_batch(batch)
+                gen_batch = self._get_gen_batch(batch) # J：获取 gen_batch, 包含 prompt, temperature, uid 等信息
 
                 # pass global_steps to trace
                 gen_batch.meta_info["global_steps"] = self.global_steps
                 rollout_n = self.config.actor_rollout_ref.rollout.n
                 gen_batch_output = gen_batch.repeat(repeat_times=rollout_n, interleave=True)
 
-                if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
+                if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX: # J：如果使用 REMAX 优势估计器，需要生成一个 greedy baseline
                     # NOTE: REMAX needs one sampled rollout plus one greedy baseline per prompt.
                     # Keep them in a single agent-loop/vLLM request to avoid sending a second
                     # rollout after replicas have been put to sleep, which can leave async vLLM
                     # engines in an invalid state for multi-turn agent workloads.
+                    # J：__do_sample__ 是一个 临时的内部控制标志位 ，专门用于 REMAX 优势估计器的组合 rollout 场景
+                    # J：- 主生成批次（policy rollout）： __do_sample__ = True （使用随机采样）
+                    # J：- 基线批次（REMAX baseline）： __do_sample__ = False （使用贪心解码）
                     gen_batch_output.non_tensor_batch["__do_sample__"] = np.ones(len(gen_batch_output), dtype=bool)
                     gen_baseline_batch = gen_batch.slice(0, None)
                     gen_baseline_batch.non_tensor_batch["__do_sample__"] = np.zeros(len(gen_baseline_batch), dtype=bool)
@@ -1487,12 +1509,13 @@ class RayPPOTrainer:
                     num_sampled_prompts = len(gen_batch_output)
 
                 is_last_step = self.global_steps >= self.total_training_steps
-                with marked_timer("step", timing_raw):
+                with marked_timer("step", timing_raw): # J：记录 step 时间， timing_raw 是用于存储 step 时间的字典
                     # generate a batch
-                    with marked_timer("gen", timing_raw, color="red"):
+                    with marked_timer("gen", timing_raw, color="red"): # J：记录生成时间
                         if curr_step_profile:
                             self.llm_server_manager.start_profile()
-                        combined_gen_output = self.async_rollout_manager.generate_sequences(combined_gen_batch)
+                        # J：生成序列
+                        combined_gen_output = self.async_rollout_manager.generate_sequences(combined_gen_batch) # J：核心函数，生成序列
                         self.checkpoint_manager.sleep_replicas()
                         if curr_step_profile:
                             self.llm_server_manager.stop_profile()
@@ -1500,18 +1523,19 @@ class RayPPOTrainer:
                         timing_raw.update(combined_gen_output.meta_info["timing"])
                         combined_gen_output.meta_info.pop("timing", None)
 
-                    gen_batch_output = combined_gen_output.slice(0, num_sampled_prompts)
+                    # J：这里理论上只有 REMAX 优势估计器中 combined_gen_output 会多出来 baseline ，其他优势估计器中 combined_gen_output 就是 gen_batch_output
+                    gen_batch_output = combined_gen_output.slice(0, num_sampled_prompts) # J：slice(start, end)
                     if "__do_sample__" in gen_batch_output.non_tensor_batch:
-                        gen_batch_output.pop(non_tensor_batch_keys=["__do_sample__"])
+                        gen_batch_output.pop(non_tensor_batch_keys=["__do_sample__"]) # J：后续阶段不需要 __do_sample__（仅用于 REMAX 优势估计器生成区分 policy rollout 和 baseline） 这个字段了
 
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
                         gen_baseline_output = combined_gen_output.slice(num_sampled_prompts, None)
                         if "__do_sample__" in gen_baseline_output.non_tensor_batch:
-                            gen_baseline_output.pop(non_tensor_batch_keys=["__do_sample__"])
+                            gen_baseline_output.pop(non_tensor_batch_keys=["__do_sample__"]) # J：后续阶段不需要 __do_sample__（仅用于 REMAX 优势估计器生成区分 policy rollout 和 baseline） 这个字段了
 
                         if self.use_rm and "rm_scores" not in gen_baseline_output.batch.keys():
-                            baseline_reward = self._compute_reward_colocate(gen_baseline_output)
-                            gen_baseline_output = gen_baseline_output.union(baseline_reward)
+                            baseline_reward = self._compute_reward_colocate(gen_baseline_output) # J：计算 reward score 并返回包含 rm_scores 张量和 reward_extra_info 字段的 DataProto 对象
+                            gen_baseline_output = gen_baseline_output.union(baseline_reward) # J：将 baseline_reward 合并到 gen_baseline_output 中
 
                         reward_baseline_tensor = gen_baseline_output.batch["rm_scores"].sum(dim=-1)
                         batch.batch["reward_baselines"] = reward_baseline_tensor
@@ -1519,8 +1543,8 @@ class RayPPOTrainer:
                         del gen_baseline_output
                     del combined_gen_batch, combined_gen_output
                     # repeat to align with repeated responses in rollout
-                    batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
-                    batch = batch.union(gen_batch_output)
+                    batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True) # J：将 batch 中的 tensor 重复 rollout_n 次，每个 tensor 都会逐元素重复
+                    batch = batch.union(gen_batch_output) # J：将 gen_batch_output 合并到 batch 中，与 batch 中的 tensor 一一对应（注意：是 repeated batch 数量才对得上）
 
                     if "response_mask" not in batch.batch.keys():
                         batch.batch["response_mask"] = compute_response_mask(batch)
@@ -1528,6 +1552,7 @@ class RayPPOTrainer:
                     # NOTE: This usually changes the order of data in the `batch`,
                     # which won't affect the advantage calculation (since it's based on uid),
                     # but might affect the loss calculation (due to the change of mini-batching).
+                    # J：TODO：
                     if self.config.trainer.balance_batch:
                         self._balance_batch(batch, metrics=metrics)
 
@@ -1558,12 +1583,12 @@ class RayPPOTrainer:
                     if bypass_recomputing_logprobs:  # Use `rollout_log_probs`
                         from verl.trainer.ppo.rollout_corr_helper import apply_bypass_mode
 
-                        apply_bypass_mode(
+                        apply_bypass_mode( # J：应用 bypass 模式，将 old_log_probs 设置为 rollout_log_probs
                             batch=batch,
                             rollout_corr_config=rollout_corr_config,
                             policy_loss_config=self.config.actor_rollout_ref.actor.policy_loss,
                         )
-                    else:  # Recompute old_log_probs
+                    else:  # Recompute old_log_probs； J：重新计算 old_log_probs，作为 proximal anchor
                         with marked_timer("old_log_prob", timing_raw, color="blue"):
                             old_log_prob, old_log_prob_mfu = self._compute_old_log_prob(batch)
                             entropys = old_log_prob.batch["entropys"]
@@ -1647,7 +1672,7 @@ class RayPPOTrainer:
                             "norm_adv_by_std_in_grpo", True
                         )  # GRPO adv normalization factor
 
-                        batch = compute_advantage(
+                        batch = compute_advantage( # J：计算优势函数
                             batch,
                             adv_estimator=self.config.algorithm.adv_estimator,
                             gamma=self.config.algorithm.gamma,
@@ -1660,13 +1685,14 @@ class RayPPOTrainer:
                     # update critic
                     if self.use_critic:
                         with marked_timer("update_critic", timing_raw, color="pink"):
-                            critic_output = self._update_critic(batch)
+                            critic_output = self._update_critic(batch) # J：更新 Critic 网络
                         critic_output_metrics = reduce_metrics(critic_output.meta_info["metrics"])
                         metrics.update(critic_output_metrics)
 
                     # implement critic warmup
-                    if self.config.trainer.critic_warmup > self.global_steps:
+                    if self.config.trainer.critic_warmup > self.global_steps: # J：如果 Critic 网络的预热步数大于当前步数，继续预热
                         # Still in critic warmup, only update weights to wake up rollout replicas.
+                        # J：为什么需要同步 rollout replicas 的权重？
                         self.checkpoint_manager.update_weights(self.global_steps)
                     else:
                         # update actor
@@ -1697,7 +1723,7 @@ class RayPPOTrainer:
 
                         # update weights from trainer to rollout
                         with marked_timer("update_weights", timing_raw, color="red"):
-                            self.checkpoint_manager.update_weights(self.global_steps)
+                            self.checkpoint_manager.update_weights(self.global_steps) # J：更新 Actor 网络的权重
 
                         actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
                         metrics.update(actor_output_metrics)
@@ -1712,7 +1738,7 @@ class RayPPOTrainer:
                     is_last_step or self.global_steps % self.config.trainer.test_freq == 0
                 ):
                     with marked_timer("testing", timing_raw, color="green"):
-                        val_metrics: dict = self._validate()
+                        val_metrics: dict = self._validate() # J：评估当前模型
                         if is_last_step:
                             last_val_metrics = val_metrics
                     metrics.update(val_metrics)
@@ -1772,7 +1798,7 @@ class RayPPOTrainer:
                 )
 
                 # TODO: make a canonical logger that supports various backend
-                logger.log(data=metrics, step=self.global_steps)
+                logger.log(data=metrics, step=self.global_steps, backend=["file"]) # J：将指标记录到后端
 
                 progress_bar.update(1)
                 self.global_steps += 1

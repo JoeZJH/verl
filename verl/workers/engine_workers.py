@@ -72,8 +72,7 @@ def _with_routing_replay_flag(enabled: bool):
 
     return decorator
 
-
-class TrainingWorker(Worker, DistProfilerExtension):
+class TrainingWorker(Worker, DistProfilerExtension): # J: Critic 工作进程
     """
     TrainingWorker provides a Tinker-like API (https://thinkingmachines.ai/tinker/) as a RayWorkerGroup
     to a single controller. Currently, we only provide more coarse grained APIs,
@@ -431,7 +430,7 @@ class TrainingWorker(Worker, DistProfilerExtension):
         return self.engine.load_checkpoint(local_path, hdfs_path, del_local_after_load)
 
 
-class ActorRolloutRefWorker(Worker, DistProfilerExtension):
+class ActorRolloutRefWorker(Worker, DistProfilerExtension): # J: Actor 工作进程
     """Hybrid worker that includes actor model, rollout and optional ref model.
     For standalone actor or rollout, use ActorWorker or BaseRollout respectively.
 
@@ -663,7 +662,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         assert "actor" in self.role, "save_checkpoint only support actor role"
         self.actor.save_checkpoint(local_path, hdfs_path, global_step, max_ckpt_to_keep)
 
-    @register(dispatch_mode=Dispatch.ONE_TO_ALL, blocking=False)
+    @register(dispatch_mode=Dispatch.ONE_TO_ALL, blocking=False) # J：异步更新所有 worker 上的权重，是 ONE_TO_ALL 模式
     async def update_weights(self, global_steps: int = None, mode: str = "auto"):
         """Update weights from trainer to rollout.
 

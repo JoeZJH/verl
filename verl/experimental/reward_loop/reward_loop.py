@@ -279,7 +279,7 @@ class RewardLoopManager:
     def __init__(self, config: DictConfig, rm_resource_pool: RayResourcePool = None):
         self.config = config
         if self.config.reward.reward_model.enable:
-            self.reward_model_manager = RewardModelManager(config.reward.reward_model, rm_resource_pool)
+            self.reward_model_manager = RewardModelManager(config.reward.reward_model, rm_resource_pool) # J：reward_model_manager 是 reward model 的管理类，负责初始化 reward model 的 replica 和路由
             self.reward_router_address = self.reward_model_manager.get_router_address()
         else:
             self.reward_model_manager = None
@@ -306,12 +306,12 @@ class RewardLoopManager:
         num_workers = self.config.reward.num_workers
         node_ids = [node["NodeID"] for node in ray.nodes() if node["Alive"] and node["Resources"].get("CPU", 0) > 0]
 
-        for i in range(num_workers):
+        for i in range(num_workers): # J：每个 reward loop worker 都分配到一个节点上
             # Round-robin scheduling over the all nodes
             node_id = node_ids[i % len(node_ids)]
 
-            self.reward_loop_workers.append(
-                self.reward_loop_workers_class.options(
+            self.reward_loop_workers.append( # J：reward_loop_workers 是 reward loop worker 的列表
+                self.reward_loop_workers_class.options( # J：reward_loop_workers_class 是 RewardLoopWorker 类的 Ray 远程对象
                     name=f"reward_loop_worker_{i}",
                     scheduling_strategy=ray.util.scheduling_strategies.NodeAffinitySchedulingStrategy(
                         node_id=node_id,
@@ -320,34 +320,36 @@ class RewardLoopManager:
                 ).remote(self.config, self.reward_router_address)
             )
 
-    def compute_rm_score(self, data: DataProto) -> DataProto:
+    def compute_rm_score(self, data: DataProto) -> DataProto: # J：计算 reward score 并返回包含 rm_scores 张量和 reward_extra_info 字段的 DataProto 对象
         if self.reward_model_manager is not None:
             self.reward_model_manager.wake_up()
 
-        chunks = data.chunk(len(self.reward_loop_workers))
+        chunks = data.chunk(len(self.reward_loop_workers)) # J：将数据分 num_workers 块
         outputs = ray.get(
             [
-                worker.compute_score_batch.remote(chunk)
+                worker.compute_score_batch.remote(chunk) # J：每个 reward loop worker 都计算一个 chunk 的 reward score
                 for worker, chunk in zip(self.reward_loop_workers, chunks, strict=True)
             ]
         )
-        outputs_flat = [item for sublist in outputs for item in sublist]
+        outputs_flat = [item for sublist in outputs for item in sublist] # J：将所有 reward loop worker 的输出展平为一个列表
 
         # compute rm score
-        scores = [item["reward_score"] for item in outputs_flat]
-        rm_scores = self.reward_manager_cls.assemble_rm_scores(data, scores)
-        batch = TensorDict({"rm_scores": rm_scores}, batch_size=len(data))
+        scores = [item["reward_score"] for item in outputs_flat] # J：抽取 “reward_score” 字段
+        rm_scores = self.reward_manager_cls.assemble_rm_scores(data, scores) # J：将每个样本的 reward score 赋值给 rm_scores 张量的最后一个 Response token
+        batch = TensorDict({"rm_scores": rm_scores}, batch_size=len(data)) # J：len(data) 和 rm_scores.size(0) 相同
 
         reward_extra_infos = [output.get("reward_extra_info", {}) for output in outputs_flat]
         reward_extra_keys = list(reward_extra_infos[0].keys())
         non_tensor_batch = {}
         for key in reward_extra_keys:
+            # J：将每个 reward的 reward_extra_info 字段转换为 numpy 数组，并存储在 non_tensor_batch 中
             non_tensor_batch[key] = np.array([info[key] for info in reward_extra_infos])
 
         if self.reward_model_manager is not None:
             self.reward_model_manager.sleep()
 
-        return DataProto(
+
+        return DataProto( # J：返回包含 rm_scores 张量和 reward_extra_info 字段的 DataProto 对象
             batch=batch, non_tensor_batch=non_tensor_batch, meta_info={"reward_extra_keys": reward_extra_keys}
         )
 

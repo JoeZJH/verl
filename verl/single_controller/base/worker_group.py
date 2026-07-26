@@ -191,7 +191,7 @@ class WorkerGroup: # J: 工作进程组类，用于管理工作进程组，每�
         """Number of workers in the group."""
         return len(self._workers)
 
-    def _bind_worker_method(self, user_defined_cls, func_generator):
+    def _bind_worker_method(self, user_defined_cls, func_generator): # J：绑定 user_defined_cls 中的方法到 WorkerGroup 中
         """Binds worker methods to the WorkerGroup based on registered attributes.
 
         Args:
@@ -218,14 +218,15 @@ class WorkerGroup: # J: 工作进程组类，用于管理工作进程组，每�
 
                 dispatch_mode = attribute["dispatch_mode"] # J：获取分发模式
                 execute_mode = attribute["execute_mode"] # J：获取执行模式
-                blocking = attribute["blocking"] # J：获取是否阻塞
+                blocking = attribute["blocking"] # J：获取是否阻塞 标记，True 表示阻塞（默认），False 表示非阻塞（update_weights 等函数是非阻塞的）
 
                 # get dispatch fn
                 if isinstance(dispatch_mode, Dispatch):
                     # get default dispatch fn
+                    # dispatch_mode 是 Dispatch 类型，即预定义的分发模式，如 Dispatch.ALL_TO_ALL 或 Dispatch.ONE_TO_ALL 等
                     fn = get_predefined_dispatch_fn(dispatch_mode=dispatch_mode) # J：根据预定义的分发模式获取分发函数字典
-                    dispatch_fn = fn["dispatch_fn"]
-                    collect_fn = fn["collect_fn"]
+                    dispatch_fn = fn["dispatch_fn"] # J：获取分发函数对象，可能是 verl.single_controller.base.decorator.dispatch_one_to_all 等
+                    collect_fn = fn["collect_fn"] # J：获取收集函数对象，可能是 verl.single_controller.base.decorator.collect_all_to_all（不做任何处理，直接返回输出） 等
                 else: # J：如果分发模式不是 Dispatch 类型，即自定义分发模式
                     assert isinstance(dispatch_mode, dict)
                     assert "dispatch_fn" in dispatch_mode # J：自定义分发模式必须包含 dispatch_fn 键
@@ -234,8 +235,8 @@ class WorkerGroup: # J: 工作进程组类，用于管理工作进程组，每�
                     collect_fn = dispatch_mode["collect_fn"]
 
                 # get execute_fn_name
-                execute_mode = get_predefined_execute_fn(execute_mode=execute_mode)
-                wg_execute_fn_name = execute_mode["execute_fn_name"]
+                execute_mode = get_predefined_execute_fn(execute_mode=execute_mode) # J：根据预定义的执行模式获取执行函数字典
+                wg_execute_fn_name = execute_mode["execute_fn_name"] # J：获取执行函数名称，execute_all 或 execute_rank_zero
 
                 # get execute_fn from string
                 try:
@@ -250,9 +251,9 @@ class WorkerGroup: # J: 工作进程组类，用于管理工作进程组，每�
                                        # J：这个函数对象可像调用普通函数一样调用，会完成 参数分发（dispatch_fn）和 方法调用（execute_fn）和结果的收集（collect_fn）等操作
                     self,
                     method_name,
-                    dispatch_fn=dispatch_fn,
-                    collect_fn=collect_fn,
-                    execute_fn=execute_fn,
+                    dispatch_fn=dispatch_fn, # J：绑定分发函数对象，可能是 verl.single_controller.base.decorator.dispatch_one_to_all 等
+                    collect_fn=collect_fn, # J：绑定收集函数对象，可能是 verl.single_controller.base.decorator.collect_all_to_all 等
+                    execute_fn=execute_fn, # J：绑定执行函数对象(真正要调用的方法)，目前是 RayWorkerGroup 实例的方法 execute_all 或 execute_rank_zero
                     blocking=blocking,
                 )
 
