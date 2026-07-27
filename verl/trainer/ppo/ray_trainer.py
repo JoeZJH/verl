@@ -1367,7 +1367,7 @@ class RayPPOTrainer:
             dataloader_kwargs={"shuffle": shuffle},
             compute_loss=True,
         )
-        actor_output = self.actor_rollout_wg.update_actor(batch_td)
+        actor_output = self.actor_rollout_wg.update_actor(batch_td) # J：更新 Actor 网络
         actor_output = tu.get(actor_output, "metrics")
         actor_output = rename_dict(actor_output, "actor/")
         # modify key name
@@ -1697,7 +1697,7 @@ class RayPPOTrainer:
                     else:
                         # update actor
                         with marked_timer("update_actor", timing_raw, color="red"):
-                            actor_output = self._update_actor(batch)
+                            actor_output = self._update_actor(batch) # J：更新 Actor 网络
 
                         # Check if the ESI (Elastic Server Instance)/training plan is close to expiration.
                         esi_close_to_expiration = should_save_ckpt_esi(
@@ -1723,7 +1723,7 @@ class RayPPOTrainer:
 
                         # update weights from trainer to rollout
                         with marked_timer("update_weights", timing_raw, color="red"):
-                            self.checkpoint_manager.update_weights(self.global_steps) # J：更新 Actor 网络的权重
+                            self.checkpoint_manager.update_weights(self.global_steps) # J：更新 Actor 网络的权重到 rollout replicas
 
                         actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
                         metrics.update(actor_output_metrics)
@@ -1800,7 +1800,7 @@ class RayPPOTrainer:
                 # TODO: make a canonical logger that supports various backend
                 logger.log(data=metrics, step=self.global_steps, backend=["file"]) # J：将指标记录到后端
 
-                progress_bar.update(1)
+                progress_bar.update(1) # J：更新进度条
                 self.global_steps += 1
 
                 if is_last_step:
