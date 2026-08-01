@@ -462,7 +462,7 @@ class RayPPOTrainer:
             print(f"Warning: Could not set total_training_steps in config. Structure missing? Error: {e}")
 
     @staticmethod
-    def _write_generations(inputs, outputs, gts, scores, reward_extra_infos_dict, dump_path, global_steps):
+    def _write_generations(inputs, outputs, gts, scores, reward_extra_infos_dict, dump_path, global_steps): # J：写出生成样本到 JSONL 文件
         """Write generation samples as JSONL (runs in background thread)."""
         os.makedirs(dump_path, exist_ok=True)
         filename = os.path.join(dump_path, f"{global_steps}.jsonl")
@@ -487,11 +487,11 @@ class RayPPOTrainer:
 
         print(f"Dumped generations to {filename}")
 
-    def _dump_generations(self, inputs, outputs, gts, scores, reward_extra_infos_dict, dump_path):
+    def _dump_generations(self, inputs, outputs, gts, scores, reward_extra_infos_dict, dump_path): # J：异步 dump 生成样本到 JSONL 文件
         """Dump rollout/validation samples as JSONL asynchronously."""
         global_steps = self.global_steps
-        future = self._dump_executor.submit(
-            self._write_generations,
+        future = self._dump_executor.submit( # J：提交 dump 任务到 dump executor
+            self._write_generations, # J：写出生成样本到 JSONL 文件
             inputs,
             outputs,
             gts,
@@ -500,29 +500,30 @@ class RayPPOTrainer:
             dump_path,
             global_steps,
         )
-        self._dump_futures.append(future)
+        self._dump_futures.append(future) # J：将 dump 任务添加到 dump_futures 列表中
         # Clean up completed futures and surface any exceptions early
         still_pending = []
-        for f in self._dump_futures:
+        for f in self._dump_futures: # J：顺便遍历 dump_futures 列表，检查是否有已完成的任务
             if f.done():
+                # J：如果 dump 任务已完成，则检查是否成功
                 f.result()  # re-raises if the write failed
             else:
-                still_pending.append(f)
-        self._dump_futures = still_pending
+                still_pending.append(f) # J：如果 dump 任务未完成，则将其添加到 still_pending 列表中
+        self._dump_futures = still_pending # J：将 dump_futures 列表更新为 still_pending 列表，即保留未完成的任务
 
     def _init_dump_executor(self):
         """Create or recreate the dump executor and futures list."""
         self._dump_executor = ThreadPoolExecutor(max_workers=1)
         self._dump_futures = []
 
-    def _shutdown_dump_executor(self):
+    def _shutdown_dump_executor(self): # J：关闭 dump executor 运行器，确保所有异步 dump 操作完成（正确执行完异步任务后退出）
         """Drain pending dump futures and shut down the executor."""
         for f in self._dump_futures:
             f.result()
         self._dump_futures.clear()
-        self._dump_executor.shutdown(wait=True)
+        self._dump_executor.shutdown(wait=True) # J：等待所有 dump 任务完成，确保 dump executor 正常退出（正确执行完异步任务后退出）
 
-    def _log_rollout_data(
+    def _log_rollout_data( # J：异步 dump 生成样本到 JSONL 文件
         self, batch: DataProto, reward_extra_infos_dict: dict, timing_raw: dict, rollout_data_dir: str
     ):
         """Log rollout data to disk.
@@ -536,9 +537,10 @@ class RayPPOTrainer:
             inputs = self.tokenizer.batch_decode(batch.batch["prompts"], skip_special_tokens=True)
             outputs = self.tokenizer.batch_decode(batch.batch["responses"], skip_special_tokens=True)
             scores = batch.batch["token_level_scores"].sum(-1).cpu().tolist()
+            # J：sample_gts 存储每个样本的 ground_truth，gts 是 ground_truths 的简称？
             sample_gts = [item.non_tensor_batch.get("reward_model", {}).get("ground_truth", None) for item in batch]
 
-            reward_extra_infos_to_dump = {
+            reward_extra_infos_to_dump = { # J：将 reward_extra_infos_dict 中的每个值转换为列表，方便 dump 到 JSONL 文件
                 k: (v.tolist() if hasattr(v, "tolist") else v) for k, v in reward_extra_infos_dict.items()
             }
             if "request_id" in batch.non_tensor_batch:
@@ -547,7 +549,7 @@ class RayPPOTrainer:
                     batch.non_tensor_batch["request_id"].tolist(),
                 )
 
-            self._dump_generations(
+            self._dump_generations( # J：异步 dump 生成样本到 JSONL 文件
                 inputs=inputs,
                 outputs=outputs,
                 gts=sample_gts,
@@ -606,7 +608,7 @@ class RayPPOTrainer:
         print(f"batch_reward: {batch_reward}")
         return batch_reward
 
-    def _validate(self, merged: bool = False):
+    def _validate(self, merged: bool = False): # J：验证模型在验证集上的性能
         data_source_lst = []
         reward_extra_infos_dict: dict[str, list] = defaultdict(list)
 
@@ -621,17 +623,17 @@ class RayPPOTrainer:
         for test_data in self.val_dataloader:
             test_batch = DataProto.from_single_dict(test_data)
 
-            if "uid" not in test_batch.non_tensor_batch:
+            if "uid" not in test_batch.non_tensor_batch: # J：如果 test_batch 中没有 uid 字段，就添加一个随机的 uid 字段
                 test_batch.non_tensor_batch["uid"] = np.array(
                     [str(uuid.uuid4()) for _ in range(len(test_batch.batch))], dtype=object
                 )
 
             # repeat test batch
-            test_batch = test_batch.repeat(
+            test_batch = test_batch.repeat( # J：重复 test_batch n 次，每个样本都生成 n 个样本
                 repeat_times=self.config.actor_rollout_ref.rollout.val_kwargs.n, interleave=True
             )
 
-            ground_truths = [
+            ground_truths = [ # J：获取 test_batch 中每个样本的 ground_truth 字段
                 item.non_tensor_batch.get("reward_model", {}).get("ground_truth", None) for item in test_batch
             ]
             sample_gts.extend(ground_truths)
@@ -708,7 +710,7 @@ class RayPPOTrainer:
         # dump generations
         val_data_dir = self.config.trainer.get("validation_data_dir", None)
         if val_data_dir:
-            self._dump_generations(
+            self._dump_generations( # J：异步 dump 验证时的生成样本到 JSONL 文件（注意：验证时也是要生成样本的，这里是记录验证时的生成样本）
                 inputs=sample_inputs,
                 outputs=sample_outputs,
                 gts=sample_gts,
@@ -1411,16 +1413,16 @@ class RayPPOTrainer:
         The light-weight advantage computation is done on the driver process.
         """
         if self._dump_executor._shutdown:
-            self._init_dump_executor()
+            self._init_dump_executor() # J：初始化 dump executor，用于异步 dump 生成轨迹样本到 JSONL 文件
 
         from omegaconf import OmegaConf
 
         from verl.utils.tracking import Tracking
 
-        logger = Tracking(
+        logger = Tracking( # J：初始化 Tracking 类，用于记录训练指标，支持不同的 backend，如 WandB、TensorBoard 等
             project_name=self.config.trainer.project_name,
             experiment_name=self.config.trainer.experiment_name,
-            default_backend=self.config.trainer.logger,
+            default_backend=self.config.trainer.logger, # J：这里可以是一个 list，用于指定默认 backend，如 WandB、TensorBoard 和 Console 等
             config=OmegaConf.to_container(self.config, resolve=True),
         )
 
@@ -1428,35 +1430,38 @@ class RayPPOTrainer:
 
         # load checkpoint and update weights before doing anything
         self._load_checkpoint() # J：加载检查点会修改 global_steps 为检查点中的 global_steps
-        self.checkpoint_manager.update_weights(self.global_steps)
+        self.checkpoint_manager.update_weights(self.global_steps) # J：更新 Actor 网络的权重到 rollout replicas
 
-        current_epoch = self.global_steps // len(self.train_dataloader)
+        # J：current_epoch 和 global_steps 都从 0 开始计数（但这里 global_steps 可能因为续训练而不为 0）
+        current_epoch = self.global_steps // len(self.train_dataloader) # J：计算当前训练轮数 = 当前 global_steps / 训练数据集大小
 
         # perform validation before training
         # currently, we only support validation using the reward_function.
-        if self.config.trainer.get("val_before_train", True):
-            val_metrics = self._validate()
+        if self.config.trainer.get("val_before_train", True): # J：一般训练不会开启这个，因为时间会比较久
+            val_metrics = self._validate() # J：验证模型在训练前的指标情况
             assert val_metrics, f"{val_metrics=}"
             pprint(f"Initial validation metrics: {val_metrics}")
             logger.log(data=val_metrics, step=self.global_steps)
             if self.config.trainer.get("val_only", False):
-                self._shutdown_dump_executor()
+                self._shutdown_dump_executor() # J：关闭 dump executor，因为验证模式下不需要 dump 数据，这里的 dump_executor 是异步 dump 生成轨迹样本到 JSONL 文件的
                 return
 
+        # J：问题，当前配置参数似乎是 config.actor_rollout_ref.rollout.skip_rollout 了
+        # J：这个参数的目的是：是在序列生成过程中加入 跳过/缓存/重复 逻辑，避免重复执行昂贵的 rollout 生成
         if self.config.actor_rollout_ref.rollout.skip.get("enable", False):
-            rollout_skip = RolloutSkip(self.config, self.async_rollout_manager)
-            rollout_skip.wrap_generate_sequences()
+            rollout_skip = RolloutSkip(self.config, self.async_rollout_manager) # J：初始化 RolloutSkip 类，用于管理跳过/缓存/重复 逻辑
+            rollout_skip.wrap_generate_sequences() # J：装饰器工厂函数 ，用于包装 rollout 工作组（ rollout_wg ）的 generate_sequences 方法，目的是在序列生成过程中加入 跳过/缓存/重复 逻辑，避免重复执行昂贵的 rollout 生成
 
         # add tqdm
         progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training Progress")
 
         # we start from step 1
-        self.global_steps += 1
-        last_val_metrics = None
-        self.max_steps_duration = 0
+        self.global_steps += 1 # J：从 1 开始计数上报信息，global_steps=0 表示初始 ckpt 状态
+        last_val_metrics = None # J：记录上一次验证的指标情况，用于记录和打印最后一次评估指标
+        self.max_steps_duration = 0 # J：记录训练过程中，单个 Step 的最大耗时
 
         prev_step_profile = False
-        curr_step_profile = (
+        curr_step_profile = ( # J：判断当前 step 是否在配置的 profiling step 列表中
             self.global_steps in self.config.global_profiler.steps
             if self.config.global_profiler.steps is not None
             else False
@@ -1466,62 +1471,71 @@ class RayPPOTrainer:
         for epoch in range(current_epoch, self.config.trainer.total_epochs): # J：遍历训练轮数
             for batch_dict in self.train_dataloader: # J：遍历训练数据集
                 if hasattr(self.actor_rollout_wg, "async_calls_finalize_fn_exec"):
-                    self.actor_rollout_wg.async_calls_finalize_fn_exec(blocking=False)
-                metrics = {}
-                timing_raw = {}
+                    # J：如果 actor_rollout_wg （actor+rollout 的 Ray 工作组）有 async_calls_finalize_fn_exec 方法，就以 非阻塞（blocking=False） 方式调用一次
+                    self.actor_rollout_wg.async_calls_finalize_fn_exec(blocking=False) # 触发对所有 worker 上 尚未完成的异步调用 （async calls queue）做一次 finalize（推进/收尾），通常是把 worker 内 Megatron AsyncCallsQueue 里挂起的异步请求真正执行/清理掉
+                    # J：理解，随 PR #4253 "[megatron] fix: megatron async save ckpt fix" 引入（commit 9d772002）
+                    # J：只有用 Megatron 后端 + async_save 开启 时，worker 上才会有挂起的异步 ckpt 保存请求，工作组才会被附加上这个 async_calls_finalize_fn_exec 方法。FSDP 等其它后端不会有，因此才需要 hasattr 兜底
+                    # J：关于 async_calls_finalize_fn_exec 函数的使用：
+                    # J： 第一：每步开头 (blocking=False ) ：清理/推进 上一个 step 遗留的异步保存请求， 不阻塞 当前 step——这样既保证异步 ckpt 不会无限堆积，又不影响训练吞吐。这是这行注释里说的"上一轮遗留的异步调用，非阻塞地执行掉"。
+                    # J： 第二：最后一步末尾 (blocking=True ) ：训练结束前 阻塞 等待所有异步保存真正完成，避免进程退出时还有未落盘的 ckpt。这与紧随其后的 _shutdown_dump_executor() 配合，确保干净退出
+                metrics = {} # J：重置 metrics 字典
+                timing_raw = {} # J：重置 timing_raw 字典
 
                 with marked_timer("start_profile", timing_raw):
-                    self._start_profiling(
-                        not prev_step_profile and curr_step_profile
-                        if self.config.global_profiler.profile_continuous_steps
+                    # J：在指定的训练 step 上，向 actor_rollout / ref_policy / critic 三个 worker group 广播开启性能采集（torch profiler / nsys / NVTX / 内存快照 / 精度调试器等）
+                    # J：所以这是一次 Ray RPC 广播，所有 rank 上的 DistProfiler.start() 都会被触发
+                    # J：特别说明：训练动辄成千上万 step，全程 profiling 既慢又产文件巨大。verl 用"按 step 精确采样 + 可选连续段"的方式，让用户只对感兴趣的 step（如 warmup 后的几个 step）做性能/内存/精度分析，便于排查训练瓶颈、显存占用、数值精度等问题
+                    self._start_profiling( # J：传入参数名为 do_profile，当 do_profile=True 时，向所有相关 worker group 广播"开启 profiling"的指令
+                        not prev_step_profile and curr_step_profile # J：只需要对每段开始（start step） 打开 profiling
+                        if self.config.global_profiler.profile_continuous_steps # J：一般为 False，但 continuous_steps 为 True 时，会连续采集 profiling 数据，此时开启仅在段首即可
                         else curr_step_profile
                     )
-                batch: DataProto = DataProto.from_single_dict(batch_dict)
-                batch.meta_info["temperature"] = self.config.actor_rollout_ref.rollout.temperature
+                batch: DataProto = DataProto.from_single_dict(batch_dict) # J：将 batch_dict 转换为 DataProto 类型
+                batch.meta_info["temperature"] = self.config.actor_rollout_ref.rollout.temperature # J：temperature 采样参数配置
 
                 # add uid to batch
-                batch.non_tensor_batch["uid"] = np.array(
+                batch.non_tensor_batch["uid"] = np.array( # J：为每个 prompt 生成一个唯一的随机 uid，用于在 trace 中标识每个 prompt
                     [str(uuid.uuid4()) for _ in range(len(batch.batch))], dtype=object
                 )
 
                 gen_batch = self._get_gen_batch(batch) # J：获取 gen_batch, 包含 prompt, temperature, uid 等信息
 
                 # pass global_steps to trace
-                gen_batch.meta_info["global_steps"] = self.global_steps
+                gen_batch.meta_info["global_steps"] = self.global_steps # J：将当前 step 传递给 trace，用于记录当前 step
                 rollout_n = self.config.actor_rollout_ref.rollout.n
-                gen_batch_output = gen_batch.repeat(repeat_times=rollout_n, interleave=True)
+                gen_batch_output = gen_batch.repeat(repeat_times=rollout_n, interleave=True) # J：重复 gen_batch 以生成多个 rollout
 
                 if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX: # J：如果使用 REMAX 优势估计器，需要生成一个 greedy baseline
                     # NOTE: REMAX needs one sampled rollout plus one greedy baseline per prompt.
                     # Keep them in a single agent-loop/vLLM request to avoid sending a second
                     # rollout after replicas have been put to sleep, which can leave async vLLM
                     # engines in an invalid state for multi-turn agent workloads.
-                    # J：__do_sample__ 是一个 临时的内部控制标志位 ，专门用于 REMAX 优势估计器的组合 rollout 场景
+                    # J：__do_sample__ 是一个 临时的内部控制标志位 ，专门用于 REMAX 优势估计器的组合 rollout 场景（注：REMAX 需要为每个 prompt 额外生成一个 greedy baseline 作为参考）
                     # J：- 主生成批次（policy rollout）： __do_sample__ = True （使用随机采样）
                     # J：- 基线批次（REMAX baseline）： __do_sample__ = False （使用贪心解码）
                     gen_batch_output.non_tensor_batch["__do_sample__"] = np.ones(len(gen_batch_output), dtype=bool)
                     gen_baseline_batch = gen_batch.slice(0, None)
                     gen_baseline_batch.non_tensor_batch["__do_sample__"] = np.zeros(len(gen_baseline_batch), dtype=bool)
-                    combined_gen_batch = DataProto.concat([gen_batch_output, gen_baseline_batch])
-                    num_sampled_prompts = len(gen_batch_output)
+                    combined_gen_batch = DataProto.concat([gen_batch_output, gen_baseline_batch]) # J：合并生成请求
+                    num_sampled_prompts = len(gen_batch_output) # J：仍只记录 policy rollout 的 prompt 数量
                 else:
                     combined_gen_batch = gen_batch_output
                     num_sampled_prompts = len(gen_batch_output)
 
-                is_last_step = self.global_steps >= self.total_training_steps
+                is_last_step = self.global_steps >= self.total_training_steps # J：判断是否是最后一步
                 with marked_timer("step", timing_raw): # J：记录 step 时间， timing_raw 是用于存储 step 时间的字典
                     # generate a batch
-                    with marked_timer("gen", timing_raw, color="red"): # J：记录生成时间
-                        if curr_step_profile:
-                            self.llm_server_manager.start_profile()
-                        # J：生成序列
+                    with marked_timer("gen", timing_raw, color="red"): # J：开始生成阶段并记录生成时间，时间上报到 timing_raw 字典中 {"gen": 生成时间}
+                        if curr_step_profile: # J：如果当前 step 开启了性能采集
+                            self.llm_server_manager.start_profile() # J：开启 llm server 性能采集
+                        # J：生成序列（核心函数）
                         combined_gen_output = self.async_rollout_manager.generate_sequences(combined_gen_batch) # J：核心函数，生成序列
-                        self.checkpoint_manager.sleep_replicas()
-                        if curr_step_profile:
-                            self.llm_server_manager.stop_profile()
+                        self.checkpoint_manager.sleep_replicas() # J：把 rollout 引擎休眠，腾出显存给训练用
+                        if curr_step_profile: # J：如果当前 step 开启了性能采集
+                            self.llm_server_manager.stop_profile() # J：关闭 llm server 性能采集
 
-                        timing_raw.update(combined_gen_output.meta_info["timing"])
-                        combined_gen_output.meta_info.pop("timing", None)
+                        timing_raw.update(combined_gen_output.meta_info["timing"]) # J：更新 timing_raw 字典，包含 llm Server 生成序列的时间
+                        combined_gen_output.meta_info.pop("timing", None) # J：从 combined_gen_output 中移除 timing 字段（应该是避免其他不必要影响）
 
                     # J：这里理论上只有 REMAX 优势估计器中 combined_gen_output 会多出来 baseline ，其他优势估计器中 combined_gen_output 就是 gen_batch_output
                     gen_batch_output = combined_gen_output.slice(0, num_sampled_prompts) # J：slice(start, end)
@@ -1731,7 +1745,7 @@ class RayPPOTrainer:
                     # Log rollout generations if enabled
                     rollout_data_dir = self.config.trainer.get("rollout_data_dir", None)
                     if rollout_data_dir:
-                        self._log_rollout_data(batch, reward_extra_infos_dict, timing_raw, rollout_data_dir)
+                        self._log_rollout_data(batch, reward_extra_infos_dict, timing_raw, rollout_data_dir) # J：异步 dump 生成样本到 JSONL 文件
 
                 # validate
                 if self.config.trainer.test_freq > 0 and (
@@ -1805,8 +1819,8 @@ class RayPPOTrainer:
 
                 if is_last_step:
                     if hasattr(self.actor_rollout_wg, "async_calls_finalize_fn_exec"):
-                        self.actor_rollout_wg.async_calls_finalize_fn_exec(blocking=True)
-                    self._shutdown_dump_executor()
+                        self.actor_rollout_wg.async_calls_finalize_fn_exec(blocking=True) # J：训练结束前 阻塞 等待所有异步保存真正完成，避免进程退出时还有未落盘的 ckpt
+                    self._shutdown_dump_executor() # J：关闭 dump executor�行器，确保所有异步 dump 操作完成（正确执行完异步任务后退出）
                     pprint(f"Final validation metrics: {last_val_metrics}")
                     progress_bar.close()
                     return

@@ -71,7 +71,7 @@ class SkipAction(Enum):
     REPEAT_LAST = "repeat_last"  # Repeat the last sample when gen_step reach skip.max_dump_step
 
 
-class RolloutSkip:
+class RolloutSkip: # J：轨迹采样跳过类，用于在 rollout 过程中跳过已 dump 的轨迹样本（若没有已 dump 的轨迹样本，则生成新的轨迹样本并 dump 到 JSONL 文件）
     """
     RolloutSkip skips sequence generation during rollout by attempting to load previously dumped data.
     If no dumped data is found, it generates new sequences and saves them to disk.
@@ -257,12 +257,12 @@ class RolloutSkip:
             #! it is not right since dapo_trainer reset `gen_steps` when resume
             self.record_gen_steps = gen_steps + self.__gen_offset_step
 
-    def wrap_generate_sequences(self) -> None:
+    def wrap_generate_sequences(self) -> None: # J：装饰器工厂函数 ，用于包装 rollout 工作组（ rollout_wg ）的 generate_sequences 方法，目的是在序列生成过程中加入 跳过/缓存/重复 逻辑，避免重复执行昂贵的 rollout 生成
         # if self.is_enable:
         #     self._rollout_wg = rollout_wg
 
         try:
-            self._rollout_wg.generate_sequences = wrap_generate_sequences(self, self._rollout_wg)
+            self._rollout_wg.generate_sequences = wrap_generate_sequences(self, self._rollout_wg) # J：装饰器工厂函数 ，用于包装 rollout 工作组（ rollout_wg ）的 generate_sequences 方法，目的是在序列生成过程中加入 跳过/缓存/重复 逻辑，避免重复执行昂贵的 rollout 生成
             print(
                 f"{self.print_mark}\033[32mSuccessfully patched `actor_rollout_wg.generate_sequences()`.\033[0m",
                 flush=True,
@@ -369,32 +369,36 @@ class RolloutSkip:
         self._new_batch.meta_info = dumped_new_batch.meta_info
 
 
-def wrap_generate_sequences(rolloutskip: RolloutSkip, rollout_wg: Any) -> Callable[..., DataProto]:
+def wrap_generate_sequences(rolloutskip: RolloutSkip, rollout_wg: Any) -> Callable[..., DataProto]: # J：装饰器工厂函数 ，用于包装 rollout 工作组（ rollout_wg ）的 generate_sequences 方法，目的是在序列生成过程中加入 跳过/缓存/重复 逻辑，避免重复执行昂贵的 rollout 生成
     generate_sequences = rollout_wg.generate_sequences
 
     def rollout_skip_wrap_fn(batch: DataProto, **kwargs: Any) -> DataProto:
-        rolloutskip.step()
+        rolloutskip.step() # J：推进一步记录状态
         # Record input batch as new_batch so dump() / replace_curr_new_batch() have it
-        rolloutskip.record(batch)
+        rolloutskip.record(batch) # J：记录当前 batch 为 new_batch
         return_batch = None
 
-        if rolloutskip.is_dump_step:
+        if rolloutskip.is_dump_step: # J：尝试从磁盘加载已经 dump 的数据
             # * try load
-            dumped_new_batch, return_batch = rolloutskip.try_load()
+            dumped_new_batch, return_batch = rolloutskip.try_load() # J：尝试从磁盘加载已经 dump 的数据
 
-            if return_batch is None:
+            if return_batch is None: # J：若失败则调用原始 generate_sequences 方法生成数据
                 # 1. Generation
-                return_batch = generate_sequences(batch, **kwargs)
+                return_batch = generate_sequences(batch, **kwargs) # J：调用原始 generate_sequences 方法生成数据
                 # 2. Dump
-                rolloutskip.dump(return_batch)
+                rolloutskip.dump(return_batch) # J：将生成的数据 dump 到磁盘
             else:
-                rolloutskip.replace_curr_new_batch(dumped_new_batch)
+                rolloutskip.replace_curr_new_batch(dumped_new_batch) # J：将加载的数据替换当前 new_batch
 
-        elif rolloutskip.action == SkipAction.CACHE:
+        elif rolloutskip.action == SkipAction.CACHE: # J：直接调用原始 generate_sequences 方法生成数据
+            # J：理解，这里的含义是 SkipAction.CACHE 表示 dump 阶段结束后，不做任何缓存读取/写入，每步都重新跑真实生成（命名上理解可能有点反常识）
             return_batch = generate_sequences(batch, **kwargs)
 
-        elif rolloutskip.action == SkipAction.REPEAT:
-            if rolloutskip.num_dumped_step == 0:
+        # J：SkipAction.REPEAT，核心思路是按照取模循环读取已经 dump 的数据
+        # J：理解 SkipAction.REPEAT 这种模式适合： 固定数量的历史样本在多 epoch 训练中循环喂给模型 ，无需新 rollout
+        # J：理解，常规时候不会使用，常见于测试或 Debug 中？
+        elif rolloutskip.action == SkipAction.REPEAT: # J：循环遍历 已 dump 步骤列表
+            if rolloutskip.num_dumped_step == 0: # J：若没有 dump 的数据，则直接生成数据
                 return_batch = generate_sequences(batch, **kwargs)
                 rolloutskip.dump(return_batch)
             else:
@@ -408,7 +412,9 @@ def wrap_generate_sequences(rolloutskip: RolloutSkip, rollout_wg: Any) -> Callab
                 else:
                     rolloutskip.replace_curr_new_batch(dumped_new_batch)
 
-        elif rolloutskip.action == SkipAction.REPEAT_LAST:
+        # J：理解SkipAction.REPEAT_LAST 这种模式适合： 只关心最近一次 rollout 结果，反复用它做后续训练/调试
+        # J：理解，常规时候不会使用，常见于测试或 Debug 中？
+        elif rolloutskip.action == SkipAction.REPEAT_LAST: # J：始终复用最近一次 dump 的数据
             target_step = rolloutskip.list_dumped_steps[-1]
             dumped_new_batch, return_batch = rolloutskip.try_load(step=target_step)
             if return_batch is None:

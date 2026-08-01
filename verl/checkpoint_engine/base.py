@@ -429,7 +429,7 @@ class CheckpointEngineManager:
         self.replicas = [r for r in self.replicas if r not in replicas_set]
 
     @auto_await
-    async def sleep_replicas(self):
+    async def sleep_replicas(self): # J：把 rollout 引擎休眠，腾出显存给训练用
         """Sleep all rollout replicas: free weight and kv_cache device memory."""
         await asyncio.gather(*[r.sleep() for r in self.replicas])
 

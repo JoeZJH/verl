@@ -149,7 +149,7 @@ def _timer(name: str, timing_raw: dict[str, float]):
         yield
     if name not in timing_raw:
         timing_raw[name] = 0
-    timing_raw[name] += timer.last
+    timing_raw[name] += timer.last # J：timer.last 记录了计时器最近一次 stop() 方法被调用后，所记录的以秒为单位的耗时
 
 
 @contextmanager
@@ -171,8 +171,8 @@ def simple_timer(name: str, timing_raw: dict[str, float]):
 
 @contextmanager
 def marked_timer( # J：带标记的定时器上下文管理器
-    name: str,
-    timing_raw: dict[str, float],
+    name: str, # J：定时器名称，用于标识该定时器
+    timing_raw: dict[str, float], # J：<Dict[str(name), float]> 用于存储定时器记录的字典，键为定时器名称，值为以秒为单位的耗时
     color: str = None,
     domain: Optional[str] = None,
     category: Optional[str] = None,

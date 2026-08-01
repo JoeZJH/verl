@@ -32,7 +32,7 @@ MLFLOW_MAX_ATTEMPTS = 3
 MLFLOW_SLEEP_SECONDS = 5
 
 
-class Tracking:
+class Tracking: # J：统一日志记录接口，支持记录到不同的后端
     """A unified tracking interface for logging experiment data to multiple backends.
 
     This class provides a centralized way to log experiment metrics, parameters, and artifacts
@@ -55,18 +55,19 @@ class Tracking:
         "file",
     ]
 
-    def __init__(self, project_name, experiment_name, default_backend: str | list[str] = "console", config=None):
+    def __init__(self, project_name, experiment_name, default_backend: str | list[str] = "console", config=None): # J：初始化 Tracking 类，用于记录训练指标，支持不同的 backend，如 WandB、TensorBoard 等
         if isinstance(default_backend, str):
             default_backend = [default_backend]
-        for backend in default_backend:
+        for backend in default_backend: # J：遍历 default_backend 中的每个后端
             if backend == "tracking":
                 import warnings
 
                 warnings.warn("`tracking` logger is deprecated. use `wandb` instead.", DeprecationWarning, stacklevel=2)
             else:
+                # J: 确保每个 backend 是支持的后端，如果要加新的自定义后端，需要在 supported_backend 中添加后才能使用
                 assert backend in self.supported_backend, f"{backend} is not supported"
 
-        self.logger = {}
+        self.logger = {} # J：初始化是针对 default_backend 中的后端，不在 default_backend 中的后端不会被初始化
 
         if "tracking" in default_backend or "wandb" in default_backend:
             import os
@@ -181,7 +182,9 @@ class Tracking:
             self.logger["file"] = FileLogger(project_name, experiment_name)
 
     def log(self, data, step, backend=None): # J：日志记录函数，将数据记录到不同的后端
-        for default_backend, logger_instance in self.logger.items():
+        for default_backend, logger_instance in self.logger.items(): # J：遍历所有后端，同时上报到所有后端中
+            # J：如果 backend 不为空，则不再上报到所有默认后端，仅上报到默认后端和 backend 中指定的后端的交集
+            # J：注意，如果 backend 中指定的后端在默认后端中不存在，则不会上报，因为说明没有被初始化过（初始化是针对 default_backend）
             if backend is None or default_backend in backend:
                 logger_instance.log(data=data, step=step)
 
