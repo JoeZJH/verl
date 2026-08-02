@@ -177,7 +177,7 @@ class LLMServerClient:
         self._load_balancer.release_server.remote(server_id=server_id)
 
     @rollout_trace_op
-    async def generate(
+    async def generate( # J：生成单轮 Rollout 序列，返回 TokenOutput 对象
         self,
         request_id,
         *,
@@ -206,7 +206,7 @@ class LLMServerClient:
                 multimodal_kwargs["audio_data"] = audio_data
             if mm_processor_kwargs:
                 multimodal_kwargs["mm_processor_kwargs"] = mm_processor_kwargs
-            output: TokenOutput = await server.generate.remote(
+            output: TokenOutput = await server.generate.remote( # J：调用 LLM 生成单轮 Rollout 序列，返回 TokenOutput 对象
                 request_id=uuid4().hex,  # use new request_id for each turn
                 prompt_ids=prompt_ids,
                 sampling_params=sampling_params,

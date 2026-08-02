@@ -215,7 +215,7 @@ def _build_schema_from_fn(fn: Callable, tool_name: str) -> OpenAIFunctionToolSch
     return OpenAIFunctionToolSchema.model_validate(raw)
 
 
-def normalize_function_tool_return(ret: Any) -> tuple[ToolResponse, float, dict]:
+def normalize_function_tool_return(ret: Any) -> tuple[ToolResponse, float, dict]: # J：将结果统一为 ToolResponse, reward, metrics 元组
     """Coerce a function's return value into the ``(ToolResponse, reward, metrics)`` triple.
 
     Accepted shapes:

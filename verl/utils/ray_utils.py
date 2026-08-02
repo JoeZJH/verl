@@ -93,8 +93,12 @@ def get_event_loop():
 
     return loop
 
-
-def auto_await(func):
+# J：auto_await 装饰器，处理下面三种方式
+# # 0. Case 0：直接返回结果（func 是普通函数）
+# # 1. Case 1：asyncio.run(coro)，直到协程完成，返回结果（func 是异步函数（协程），调用方是同步代码（脚本顶层 / 普通 def）无 event loop）
+# # 2. Case 2：返回 coroutine()，调用方会 await（func 是异步函数（协程），调用方是 async 函数，有 event loop，会 await）
+# # 3. Case 3：开线程跑 asyncio.run(coro) 并等待结果返回（func 是异步函数（协程），调用方是同步函数，但被某个 async 栈间接调到，有 event loop 但不能用 await）
+def auto_await(func): # J：verl 自定义的装饰器，用于自动处理异步函数的调用方式
     """Auto await a coroutine function.
 
     Handles three cases:
@@ -108,32 +112,47 @@ def auto_await(func):
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        coro = func(*args, **kwargs)
+        coro = func(*args, **kwargs) # J：若为异步函数，返回 coroutine，若为同步函数，直接返回结果
 
-        if not inspect.iscoroutine(coro):
+        # J: case 0, func 是普通函数，直接返回结果
+        if not inspect.iscoroutine(coro): # J：如果不是 coroutine，直接返回结果
             return coro
 
         try:
-            loop = asyncio.get_running_loop()
+            # # J：理解：
+            # # # J：当前线程无运行中的 event loop 的场景：1) 脚本顶层 或 2) 普通 def foo() 内等 都是
+            # # # J：当前线程有运行中的 event loop 的场景：1)async def foo() 内 + 写 await foo() 或 2）同步函数被某个 async 函数间接调用
+            loop = asyncio.get_running_loop() # J：获取当前运行中的 event loop，如果没有则抛出 RuntimeError
         except RuntimeError:
             loop = None
 
         # Case 1: No running loop -> run with asyncio.run()
-        if loop is None:
-            return asyncio.run(coro)
+        # J: case 1, func 是异步函数（协程），调用方是同步代码（脚本顶层 / 普通 def），无 event loop
+        if loop is None: # J：如果没有运行中的 event loop（即不是使用类似 await func(...) 的方式调用的），则用 asyncio.run() 同步执行并返回结果
+            return asyncio.run(coro) # J：同步执行并返回结果，注：如果协程内部有 await 操作，会阻塞当前线程，直到 await 的结果返回
 
         # Case 2: Running loop -> return coro if caller will await
-        caller_frame = inspect.currentframe()
-        if caller_frame is not None:
-            caller_frame = caller_frame.f_back
-        caller_is_async = caller_frame is not None and (caller_frame.f_code.co_flags & inspect.CO_COROUTINE) != 0
-        if caller_is_async:
-            return coro
+        # J: Case 2, func 是异步函数（协程），调用方是 async 函数，有 event loop，会 await
+        caller_frame = inspect.currentframe() # J：返回 当前这一行所在的栈帧 ，也就是 wrapper 函数自身的帧（C Python 中是 PyFrameObject 的引用），注：栈帧保存了函数调用现场：局部变量、返回地址、对应的 code object 等
+        if caller_frame is not None: # J：如果有调用帧，说明有其他调用方使用 await func(...) 的方式本函数，考虑直接返回给调用方即可
+            caller_frame = caller_frame.f_back # J：frame.f_back 是栈帧的 回溯指针 ，指向调用当前函数的那一帧
+        
+        # J：若调用方式是 await func(...) 调用当前函数且调用方是 async 函数，则可以直接返回 coroutine，交给调用方的 event loop 自行处理
+        caller_is_async = caller_frame is not None and (caller_frame.f_code.co_flags & inspect.CO_COROUTINE) != 0 # J：进一步判断调用方是不是 async 函数
+        if caller_is_async: # J：如果是 async 函数，直接返回 coroutine
+            return coro # J：返回 coroutine，交给调用方的 event loop 处理，注："等待"这件事由调用方的 await 来做，wrapper 不需要、也不能代劳
+
+        # J：如果没有 Case 2，所有"有运行中 loop"的情况都会进 Case 3——开新线程 + asyncio.run 。这能工作但有代价：
+        # 1. 线程切换开销 ：每次调用都要起一个线程
+        # 2. 失去并发语义 ：调用方明明是 async，本可以 asyncio.gather 多个 mgr.generate_sequences(...) 并发，结果被强行塞到独立线程里串行等待
+        # 3. event loop 隔离 ：内部协程跑在另一个线程的新 loop 上，与原 loop 的任务（比如 client session、connection pool）无法共享
+        # J：所以 Case 2 的存在意义是： 识别出"调用方会 await"这种最自然的异步使用方式，把控制权完整交还给调用方的 event loop ，让 @auto_await 既兼容同步调用，又不损害异步调用的并发能力
 
         # Case 3: Running loop -> run coro in thread pool
         # (cannot block the loop thread without deadlock)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(asyncio.run, coro)
-            return future.result()
+        # J：Case 3, func 是异步函数（协程），调用方是同步函数，但被某个 async 栈间接调到，有 event loop 但不能用 await
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool: # J：创建一个线程池，最多有一个线程
+            future = pool.submit(asyncio.run, coro) # J：提交一个任务到线程池，任务是 asyncio.run(coro)
+            return future.result() # J：等待线程池中的任务完成，返回结果
 
     return wrapper

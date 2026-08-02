@@ -41,11 +41,11 @@ class FunctionCall(BaseModel):
     """The name of the function to call."""
 
 
-class ToolParser(ABC):
+class ToolParser(ABC): # J：定义工具 Parser 基类
     _registry: dict[str, type["ToolParser"]] = {}
 
     def __init__(self, tokenizer) -> None:
-        self.tokenizer = tokenizer
+        self.tokenizer = tokenizer # J：初始化 Tokenizer
 
     @property
     def stop_token_ids(self) -> list[int]:
@@ -60,7 +60,7 @@ class ToolParser(ABC):
         return []
 
     @abstractmethod
-    async def extract_tool_calls(
+    async def extract_tool_calls( # J：从响应中提取工具调用，待下游子类实现，一般需要先解码 responses_ids 为文本，然后根据正则表达式提取工具调用
         self, responses_ids: list[int], tools: list[OpenAIFunctionToolSchema] = None
     ) -> tuple[str, list[FunctionCall]]:
         """Extract tool calls from the responses.
@@ -75,13 +75,13 @@ class ToolParser(ABC):
         raise NotImplementedError
 
     @classmethod
-    def get_tool_parser(cls, name: str, tokenizer):
+    def get_tool_parser(cls, name: str, tokenizer): # J：根据工具 Parser 名称获取工具 Parser
         if name not in cls._registry:
             raise ValueError(f"Unknown tool parser: {name}")
-        return cls._registry[name](tokenizer)
+        return cls._registry[name](tokenizer) # J：返回工具 Parser 实例(根据 Tokenizer 初始化)
 
     @classmethod
-    def register(cls, name: str):
+    def register(cls, name: str): # J：注册工具 Parser
         def decorator(subclass: type[ToolParser]) -> type[ToolParser]:
             cls._registry[name] = subclass
             return subclass
@@ -90,7 +90,7 @@ class ToolParser(ABC):
 
 
 @ToolParser.register("hermes")
-class HermesToolParser(ToolParser):
+class HermesToolParser(ToolParser): # J：定义 Hermes Tool Parser，继承 ToolParser 基类
     """Adapted from https://github.com/vllm-project/vllm/blob/v0.9.1/vllm/entrypoints/openai/tool_parsers/hermes_tool_parser.py"""
 
     def __init__(self, tokenizer) -> None:
@@ -111,18 +111,18 @@ class HermesToolParser(ToolParser):
 
         matches = self.tool_call_regex.findall(text)
         function_calls = []
-        for match in matches:
+        for match in matches: # J：遍历所有匹配的工具调用
             try:
-                function_call = json.loads(match)
-                name, arguments = function_call["name"], function_call["arguments"]
-                function_calls.append(FunctionCall(name=name, arguments=json.dumps(arguments, ensure_ascii=False)))
+                function_call = json.loads(match) # J：解析 JSON 字符串为函数调用
+                name, arguments = function_call["name"], function_call["arguments"] # J：提取函数调用的名称和参数
+                function_calls.append(FunctionCall(name=name, arguments=json.dumps(arguments, ensure_ascii=False))) # J：将函数调用添加到列表中
             except Exception as e:
                 logger.error(f"Failed to decode tool call: {e}")
 
         # remaing text exclude tool call tokens
-        content = self.tool_call_regex.sub("", text)
+        content = self.tool_call_regex.sub("", text) # J：从 text 中移除所有工具调用内容相关的 Token，保留其他内容
 
-        return content, function_calls
+        return content, function_calls # J：返回不包含工具调用文本的 Text 内容和提取到的工具调用
 
 
 @ToolParser.register("gpt-oss")

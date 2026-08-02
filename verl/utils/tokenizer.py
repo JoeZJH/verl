@@ -25,7 +25,7 @@ __all__ = [
 ]
 
 
-def normalize_token_ids(tokenized_output) -> list[int]: # J：将各种格式的分词后的输出转换为平铺的 token ids 列表
+def normalize_token_ids(tokenized_output) -> list[int]: # J：将各种格式的分词结果，转换为统一的平铺的 token ids 列表
     """Normalize tokenizer outputs into a flat ``list[int]``.
 
     This handles Transformers 4/5 differences where ``apply_chat_template(tokenize=True)``

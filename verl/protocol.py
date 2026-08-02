@@ -718,8 +718,8 @@ class DataProto: # J：核心数据结构
         # Return a new DataProto object
         return type(self)(batch=sliced_batch, non_tensor_batch=sliced_non_tensor, meta_info=self.meta_info)
 
-    # J：删除指定集合并返回为新的 DataProto 对象，包含 poped 的 batch_keys 和 meta_info_keys
-    def pop(self, batch_keys=None, non_tensor_batch_keys=None, meta_info_keys=None) -> "DataProto":
+    # J：删除指定集合并返回为新的 DataProto 对象，包含 poped 的 batch_keys 、non_tensor_batch_keys 和 meta_info_keys
+    def pop(self, batch_keys=None, non_tensor_batch_keys=None, meta_info_keys=None) -> "DataProto": # J：删除指定集合并返回为新的 DataProto 对象，包含 poped 的 batch_keys 、non_tensor_batch_keys 、 和 meta_info_keys
         """Pop a subset of the DataProto via `batch_keys` and `meta_info_keys`
 
         Args:
@@ -738,19 +738,20 @@ class DataProto: # J：核心数据结构
 
         tensors = {}
         # tensor batch
-        for key in batch_keys:
+        for key in batch_keys: # J：删除 batch 中的指定字段
             assert key in self.batch.keys()
             tensors[key] = self.batch.pop(key)
         non_tensors = {}
         # non tensor batch
-        for key in non_tensor_batch_keys:
+        for key in non_tensor_batch_keys: # J：删除 non_tensor_batch 中的指定字段
             assert key in self.non_tensor_batch.keys()
             non_tensors[key] = self.non_tensor_batch.pop(key)
         meta_info = {}
-        for key in meta_info_keys:
+        for key in meta_info_keys: # J：删除 meta_info 中的指定字段
             assert key in self.meta_info.keys()
             meta_info[key] = self.meta_info.pop(key)
-        return DataProto.from_dict(tensors=tensors, non_tensors=non_tensors, meta_info=meta_info)
+
+        return DataProto.from_dict(tensors=tensors, non_tensors=non_tensors, meta_info=meta_info) # J：返回新的 DataProto 对象，包含 poped 的 batch_keys 、non_tensor_batch_keys 、 和 meta_info_keys
 
     def rename(self, old_keys=None, new_keys=None) -> "DataProto":
         """

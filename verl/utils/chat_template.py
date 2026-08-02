@@ -66,7 +66,7 @@ def extract_system_prompt_and_generation(tokenizer, **apply_chat_template_kwargs
     return system_prompt, generate_prompt
 
 
-def apply_chat_template(
+def apply_chat_template( # J：应用 chat template 并将消息转换为 token_ids
     processor: PreTrainedTokenizerBase | ProcessorMixin,
     messages: list[dict],
     *,
@@ -102,8 +102,8 @@ def apply_chat_template(
         )
     except Exception:
         # Qwen3.5 apply_chat_template needs messages with at least one user message
-        dummy_user_message = [{"role": "user", "content": [{"type": "text", "text": ""}]}]
-        dummy_user_prefix = processor.apply_chat_template(
+        dummy_user_message = [{"role": "user", "content": [{"type": "text", "text": ""}]}] # J：For Qwen3.5 适配，添加一个空的 user message，确保至少有一个 user message，后续会在编码结果中移除
+        dummy_user_prefix = processor.apply_chat_template( # J：应用 chat template 到 dummy_user_message，获取 prefix token_ids
             dummy_user_message,
             tokenize=tokenize,
             add_generation_prompt=False,
@@ -111,7 +111,7 @@ def apply_chat_template(
             return_dict=return_dict,
             **kwargs,
         )
-        output = processor.apply_chat_template(
+        output = processor.apply_chat_template( # J：应用 chat template 到 dummy_user_message + messages，获取 token_ids
             dummy_user_message + messages,
             tokenize=tokenize,
             add_generation_prompt=add_generation_prompt,
@@ -121,17 +121,17 @@ def apply_chat_template(
         )
 
         if not tokenize:  # tokenize=False
-            return output[len(dummy_user_prefix) :]
+            return output[len(dummy_user_prefix) :] # J：移除 dummy_user_prefix 中的 token_ids，只返回消息部分的 token_ids
         elif not return_dict:  # tokenize=True and return_dict=False
             if isinstance(output[0], list):  # transformers>=5
                 assert len(output) == 1, "output must be a list[int] or list[list[int]]"
                 dummy_user_prefix = dummy_user_prefix[0]
                 output = output[0]
-            return output[len(dummy_user_prefix) :]
+            return output[len(dummy_user_prefix) :] # J：移除 dummy_user_prefix 中的 token_ids，只返回消息部分的 token_ids
         else:  # tokenize=True and return_dict=True and return_tensors="pt"
             dummy_user_prefix = dict(dummy_user_prefix)
             output = dict(output)
-            prefix_len = dummy_user_prefix["input_ids"].shape[1]
+            prefix_len = dummy_user_prefix["input_ids"].shape[1] # J：计算 prefix token_ids 的长度，用于移除 dummy_user_prefix 中的 token_ids
             output["input_ids"] = output["input_ids"][:, prefix_len:]
             output["attention_mask"] = output["attention_mask"][:, prefix_len:]
             if "mm_token_type_ids" in output:

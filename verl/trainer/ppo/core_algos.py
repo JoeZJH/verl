@@ -1135,11 +1135,11 @@ def compute_rewards(token_level_scores, old_log_prob, ref_log_prob, kl_ratio):
     return token_level_scores - kl * kl_ratio
 
 
-def agg_loss(
+def agg_loss( # J：根据 loss_agg_mode 聚合 loss_mat
     loss_mat: torch.Tensor,
     loss_mask: torch.Tensor,
     loss_agg_mode: str,
-    dp_size: int = 1,
+    dp_size: int = 1, # J: 用于补偿 DP 导致的 all-reduce MEAN 问题（final_grad = sum(local_grad) / dp_size），DP 会让每个 DP rank 负责一个 micro-batch
     batch_num_tokens: Optional[int] = None,
     global_batch_size: Optional[int] = None,
     loss_scale_factor: Optional[int] = None,
@@ -1165,13 +1165,13 @@ def agg_loss(
         loss: `a scalar torch.Tensor`
             aggregated loss
     """
-    if loss_agg_mode == "token-mean":
+    if loss_agg_mode == "token-mean": # J：按 token 平均聚合 loss_mat
         if batch_num_tokens is None:
             if dp_size > 1:
                 raise ValueError("(global) batch_num_tokens is required when dp_size > 1")
             batch_num_tokens = loss_mask.sum()
-        loss = verl_F.masked_sum(loss_mat, loss_mask) / batch_num_tokens * dp_size
-    elif loss_agg_mode in ["seq-mean-token-sum", "seq-mean-token-sum-norm"]:
+        loss = verl_F.masked_sum(loss_mat, loss_mask) / batch_num_tokens * dp_size # J：乘以 dp_size 是因为后续 all-reduce 梯度时会按照 dp_size 取平均的补偿
+    elif loss_agg_mode in ["seq-mean-token-sum", "seq-mean-token-sum-norm"]: # J：先 seq 内部 token sum，再按 seq 之间平均聚合（"seq-mean-token-sum-norm" 则再除以一个归一化因子）
         seq_losses = torch.sum(loss_mat * loss_mask, dim=-1)  # token-sum
         seq_mask = (torch.sum(loss_mask, dim=-1) > 0).float()  # exclude fully masked sequences
         if global_batch_size is None:
@@ -1179,12 +1179,13 @@ def agg_loss(
                 raise ValueError("global_batch_size is required when dp_size > 1")
             global_batch_size = seq_mask.sum()
         loss = verl_F.masked_sum(seq_losses, seq_mask) / global_batch_size * dp_size  # seq-mean
-        if loss_agg_mode == "seq-mean-token-sum-norm":
-            if loss_scale_factor is None:
-                horizon = loss_mask.shape[-1]
+        if loss_agg_mode == "seq-mean-token-sum-norm": # J：归一化 seq sum loss
+            if loss_scale_factor is None: # J：若指定 loss_scale_factor，则直接使用，否则默认使用 response_length 作为归一化因子
+                horizon = loss_mask.shape[-1] # J: loss_mask 的 shape 是 (bs, response_length)，这里 horizon 是 response_length(padding 后的序列长度)
+                                              # J：某些实现下，response_length 是固定的 max_response_length；某些条件下可能是动态的，要想稳定，还是建议传递 loss_scale_factor
                 loss_scale_factor = horizon
             loss /= loss_scale_factor
-    elif loss_agg_mode == "seq-mean-token-mean":
+    elif loss_agg_mode == "seq-mean-token-mean": # J：先 seq 内部 token mean，再按 seq 之间平均聚合
         seq_mask = torch.sum(loss_mask, dim=-1)  # per-sequence token count
         seq_losses = torch.sum(loss_mat * loss_mask, dim=-1) / (seq_mask + 1e-8)  # token-mean
         seq_mask = (seq_mask > 0).float()  # exclude fully masked sequences

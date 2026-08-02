@@ -1099,7 +1099,7 @@ def compute_rollout_corr_metrics_from_logprobs(
     return metrics_with_prefix
 
 
-def apply_bypass_mode(
+def apply_bypass_mode( # J：应用 bypass 模式，此时是直接设置 old_log_probs = rollout_log_probs，回填到 batch["old_log_probs"] 字段
     batch: DataProto,
     rollout_corr_config: Optional[RolloutCorrectionConfig] = None,
     policy_loss_config: PolicyLossConfig = None,
@@ -1128,7 +1128,7 @@ def apply_bypass_mode(
         )
 
     # Use rollout log probs as old log probs (zero-cost substitution)
-    batch.batch["old_log_probs"] = batch.batch["rollout_log_probs"]
+    batch.batch["old_log_probs"] = batch.batch["rollout_log_probs"] # J：直接将 rollout_log_probs 设置为 old_log_probs，避免计算 old_log_probs
 
     with open_dict(policy_loss_config):
         # Pass rollout_correction config to actor for loss computation and metrics

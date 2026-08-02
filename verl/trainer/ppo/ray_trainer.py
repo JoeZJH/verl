@@ -115,7 +115,7 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.AdaptiveKLController, 
     return data, metrics
 
 
-def compute_response_mask(data: DataProto): # J：计算 Response 部分的注意力掩码
+def compute_response_mask(data: DataProto): # J：计算 Response 部分的注意力掩码，读取 data.batch["attention_mask"]
     """Compute the attention mask for the response part of the sequence.
 
     This function extracts the portion of the attention mask that corresponds to the model's response,
@@ -128,9 +128,9 @@ def compute_response_mask(data: DataProto): # J：计算 Response 部分的注�
         torch.Tensor: The attention mask for the response tokens.
     """
     responses = data.batch["responses"]
-    response_length = responses.size(1) # J：responses.size(1) 是 padding 后的最大长度 ，不是每个 response 的真实长度
-    attention_mask = data.batch["attention_mask"]
-    return attention_mask[:, -response_length:] # J：仅返回 Response 部分的注意力掩码
+    response_length = responses.size(1) # J：注：responses.size(1) 是 padding 后的最大长度 ，不是每个 response 的真实长度
+    attention_mask = data.batch["attention_mask"] # J：获取注意力掩码
+    return attention_mask[:, -response_length:] # J：对注意力掩码进行截断，仅返回 Response 部分的注意力掩码
 
 
 def compute_spec_decode_metrics(
@@ -582,31 +582,32 @@ class RayPPOTrainer:
         # Log to each configured logger
         self.validation_generations_logger.log(self.config.trainer.logger, samples, self.global_steps)
 
-    def _get_gen_batch(self, batch: DataProto) -> DataProto:
-        reward_keys = set({"data_source", "reward_model", "extra_info", "uid"}) & batch.non_tensor_batch.keys()
+    def _get_gen_batch(self, batch: DataProto) -> DataProto: # J：从 batch 中提取生成样本的 batch
+        reward_keys = set({"data_source", "reward_model", "extra_info", "uid"}) & batch.non_tensor_batch.keys() # J：两个 set 取交集，保留 batch 中的 non_tensor_batch 中的 reward 相关字段
 
         # pop those keys for generation
         batch_keys_to_pop = []
-        non_tensor_batch_keys_to_pop = set(batch.non_tensor_batch.keys()) - reward_keys
-        gen_batch = batch.pop(
-            batch_keys=batch_keys_to_pop,
-            non_tensor_batch_keys=list(non_tensor_batch_keys_to_pop),
+        non_tensor_batch_keys_to_pop = set(batch.non_tensor_batch.keys()) - reward_keys # J：两个 set 取差集，保留 batch 中的 non_tensor_batch 中的非 reward 相关字段
+        # J：这里执行后，batch 中的 non_tensor_batch 中仅包含 reward 相关字段
+        gen_batch = batch.pop( # J: gen_batch 是一个 DataProto 对象，仅包含非 reward 相关字段
+            batch_keys=batch_keys_to_pop, # J：batch_keys_to_pop 是一个空列表，不删除 batch 中的任何字段
+            non_tensor_batch_keys=list(non_tensor_batch_keys_to_pop), # J：将 non_tensor_batch_keys_to_pop 转换为列表，用于删除 non_tensor_batch 中的字段
         )
 
         # For agent loop, we need reward model keys to compute score.
-        gen_batch.non_tensor_batch.update(batch.non_tensor_batch)
+        gen_batch.non_tensor_batch.update(batch.non_tensor_batch) # J：此时 batch 中的 non_tensor_batch 中仅包含 reward 相关字段，将它们添加到 gen_batch 中的 non_tensor_batch 中，用于计算 reward score
 
         return gen_batch
 
-    def _compute_reward_colocate(self, batch: DataProto) -> tuple[torch.Tensor, dict[str, Any]] | torch.Tensor: # J：计算 reward score 并返回包含 rm_scores 张量和 reward_extra_info 字段的 DataProto 对象
+    def _compute_reward_colocate(self, batch: DataProto) -> tuple[torch.Tensor, dict[str, Any]] | torch.Tensor: # J：计算 reward score 并返回包含 rm_scores 张量和 reward_extra_info 字段的 DataProto 对象，注：仅每个样本的最后一个 Response token 被赋值，其余 Token 都是 0
         # J：问题：reward_loop_manager.compute_rm_score(batch) 返回的是一个 DataProto 对象，这里写错 为 tuple[torch.Tensor, dict[str, Any]] | torch.Tensor 了
         """
         compute reward use colocate reward model
         """
         assert self.reward_loop_manager is not None, "RewardLoopManager is None"
-        batch_reward = self.reward_loop_manager.compute_rm_score(batch)  # J：计算 reward score 并返回包含 rm_scores 张量和 reward_extra_info 字段的 DataProto 对象
+        batch_reward = self.reward_loop_manager.compute_rm_score(batch)  # J：计算 reward score 并返回包含 rm_scores 张量和 reward_extra_info 字段的 DataProto 对象，注：仅每个样本的最后一个 Response token 被赋值，其余 Token 都是 0
         print(f"batch_reward: {batch_reward}")
-        return batch_reward
+        return batch_reward # 注：仅每个样本的最后一个 Response token 被赋值，其余 Token 都是 0
 
     def _validate(self, merged: bool = False): # J：验证模型在验证集上的性能
         data_source_lst = []
@@ -1191,7 +1192,9 @@ class RayPPOTrainer:
             dp_rank_mapping = worker_group._dispatch_info[role]
         return max(dp_rank_mapping) + 1
 
-    def _balance_batch(self, batch: DataProto, metrics, logging_prefix="global_seqlen", keep_minibatch=False):
+    # J：平衡每个 DP rank 上的 token 数量，当 use_prefix_grouper 为 True 时，根据 uid 进行分组，保证相同 uid 的样本在同一个 DP rank 上，用于 prefix sharing 优化
+    # J：该函数用于在单控器上 重排 batch 数据，使每个 DP（数据并行）rank 分到相近数量的 token ，避免因序列长度不均导致某些 rank 计算负载过重而形成等待
+    def _balance_batch(self, batch: DataProto, metrics, logging_prefix="global_seqlen", keep_minibatch=False): # J：平衡每个 DP rank 上的 token 数量
         """Reorder the data on single controller such that each dp rank gets similar total tokens.
 
         When use_prefix_grouper is enabled, uses group-level balancing to keep samples with
@@ -1206,7 +1209,8 @@ class RayPPOTrainer:
         dp_size = self._get_dp_size(self.actor_rollout_wg, "actor")
 
         # Use group-level balancing for PrefixGrouper to keep same-uid samples together
-        if getattr(self, "use_prefix_grouper", False) and "uid" in batch.non_tensor_batch:
+        if getattr(self, "use_prefix_grouper", False) and "uid" in batch.non_tensor_batch: # J：均衡策略1（use_prefix_grouper=True 且含 uid）
+                    #                                                                      # J：调用 get_group_balanced_partitions ，保证相同 uid 的样本落在同一 rank，利于 prefix 复用；要求 num_groups % dp_size == 0
             from verl.utils.seqlen_balancing import get_group_balanced_partitions
 
             uid_list = list(batch.non_tensor_batch["uid"])
@@ -1230,7 +1234,8 @@ class RayPPOTrainer:
                 k_partitions=dp_size,
             )
 
-        elif keep_minibatch:
+        elif keep_minibatch: # J：均衡策略2（keep_minibatch=True）
+                             # J：解耦 DP 均衡与 minibatch：先按 minibatch 切片，每个 minibatch 内部独立做 dp_size 路均衡，再拼接成全局 partition
             # Decouple the DP balancing and mini-batching.
             minibatch_size = self.config.actor_rollout_ref.actor.get("ppo_mini_batch_size")
             minibatch_num = len(workload_lst) // minibatch_size
@@ -1243,23 +1248,25 @@ class RayPPOTrainer:
                 )
                 for j, part in enumerate(rearrange_minibatch_lst):
                     global_partition_lst[j].extend([x + minibatch_size * i for x in part])
-        else:
+        else: # J：均衡策略3（默认方法）
+              # J：直接对全部样本做 get_seqlen_balanced_partitions(workload_lst, k_partitions=dp_size)
             global_partition_lst = get_seqlen_balanced_partitions(workload_lst, k_partitions=dp_size, equal_size=True)
         # Place smaller micro-batches at both ends to reduce the bubbles in pipeline parallel.
         # Skip reordering within partitions for PrefixGrouper to maintain uid grouping
         if not getattr(self, "use_prefix_grouper", False):
+            # J：非 PrefixGrouper 场景下，每个 partition 内按 workload 升序排序，再用 partition[::2] + partition[1::2][::-1] —— 让流水线并行首尾阶段处理较短序列，降低气泡
             for idx, partition in enumerate(global_partition_lst):
-                partition.sort(key=lambda x: (workload_lst[x], x))
-                ordered_partition = partition[::2] + partition[1::2][::-1]
-                global_partition_lst[idx] = ordered_partition
+                partition.sort(key=lambda x: (workload_lst[x], x)) # J：按 workload 升序排序
+                ordered_partition = partition[::2] + partition[1::2][::-1] # J：把较小 micro-batch 放到首尾，降低气泡（[0,1,2,3,4,5] -> [0,2,4,5,3,1]）
+                global_partition_lst[idx] = ordered_partition # J：更新 global_partition_lst 中的 partition 为有序 partition
 
         # reorder based on index. The data will be automatically equally partitioned by dispatch function
-        global_idx = torch.tensor([j for partition in global_partition_lst for j in partition])
-        batch.reorder(global_idx)
-        global_balance_stats = log_seqlen_unbalance(
+        global_idx = torch.tensor([j for partition in global_partition_lst for j in partition]) # J：将 global_partition_lst 中的所有 partition 展平并为一个列表
+        batch.reorder(global_idx) # J：根据 global_idx 重新排序 batch 中的数据
+        global_balance_stats = log_seqlen_unbalance( # J：计算并记录 sequence length 不平衡相关的指标
             seqlen_list=global_seqlen_lst.tolist(), partitions=global_partition_lst, prefix=logging_prefix
         )
-        metrics.update(global_balance_stats)
+        metrics.update(global_balance_stats) # J：更新 metrics 中 sequence length 不平衡相关的指标
 
     def _compute_values(self, batch: DataProto) -> DataProto:
         batch_td = batch.to_tensordict()
@@ -1275,7 +1282,7 @@ class RayPPOTrainer:
         values = DataProto.from_tensordict(values)
         return values
 
-    def _compute_ref_log_prob(self, batch: DataProto) -> DataProto:
+    def _compute_ref_log_prob(self, batch: DataProto) -> DataProto: # J：计算 "ref" 的 log_probs，回填到 batch["ref_log_prob"] 字段
         # step 1: convert dataproto to tensordict.
         batch_td = batch.to_tensordict()
         # step 2: convert from padding to nopadding
@@ -1294,12 +1301,12 @@ class RayPPOTrainer:
         # step 4. No padding to padding
         log_probs = no_padding_2_padding(log_probs, batch_td)
         # step 5: rebuild a tensordict and convert to dataproto
-        ref_log_prob = tu.get_tensordict({"ref_log_prob": log_probs.float()})
+        ref_log_prob = tu.get_tensordict({"ref_log_prob": log_probs.float()}) # J：回填到 “ref_log_prob” 字段
         ref_log_prob = DataProto.from_tensordict(ref_log_prob)
 
         return ref_log_prob
 
-    def _compute_old_log_prob(self, batch: DataProto):
+    def _compute_old_log_prob(self, batch: DataProto): # J：计算 old_log_probs，返回 old_log_probs(DataProto, 包含 old_log_probs, entropys, routed_experts, sum_pi_squared 等 key)  和 old_log_prob_mfu(torch.Tensor, 是计算 old_log_probs 的 mfu 指标)
         # TODO: remove step 1, 2, 4 after we make the whole training tensordict and padding free
         # step 1: convert dataproto to tensordict.
         batch_td = batch.to_tensordict()
@@ -1313,7 +1320,7 @@ class RayPPOTrainer:
             calculate_sum_pi_squared=calculate_sum_pi_squared,
             compute_loss=False,
         )
-        output = self.actor_rollout_wg.compute_log_prob(batch_td)
+        output = self.actor_rollout_wg.compute_log_prob(batch_td) # J：计算 old_log_probs，到这里时，其实 \pi_{old} 等于 \pi_{\theta}
         # gather output
         entropy = tu.get(output, "entropy")
         log_probs = tu.get(output, "log_probs")
@@ -1334,7 +1341,7 @@ class RayPPOTrainer:
             result["sum_pi_squared"] = sum_pi_squared.float()
         old_log_prob = tu.get_tensordict(result)
         old_log_prob = DataProto.from_tensordict(old_log_prob)
-        return old_log_prob, old_log_prob_mfu
+        return old_log_prob, old_log_prob_mfu # J：返回 old_log_probs(DataProto, 包含 old_log_probs, entropys, routed_experts, sum_pi_squared 等 key)  和 old_log_prob_mfu(torch.Tensor, 是计算 old_log_probs 的 mfu 指标)
 
     def _update_actor(self, batch: DataProto) -> DataProto:
         rollout_config = self.config.actor_rollout_ref.rollout
@@ -1513,11 +1520,12 @@ class RayPPOTrainer:
                     # J：__do_sample__ 是一个 临时的内部控制标志位 ，专门用于 REMAX 优势估计器的组合 rollout 场景（注：REMAX 需要为每个 prompt 额外生成一个 greedy baseline 作为参考）
                     # J：- 主生成批次（policy rollout）： __do_sample__ = True （使用随机采样）
                     # J：- 基线批次（REMAX baseline）： __do_sample__ = False （使用贪心解码）
-                    gen_batch_output.non_tensor_batch["__do_sample__"] = np.ones(len(gen_batch_output), dtype=bool)
-                    gen_baseline_batch = gen_batch.slice(0, None)
-                    gen_baseline_batch.non_tensor_batch["__do_sample__"] = np.zeros(len(gen_baseline_batch), dtype=bool)
-                    combined_gen_batch = DataProto.concat([gen_batch_output, gen_baseline_batch]) # J：合并生成请求
-                    num_sampled_prompts = len(gen_batch_output) # J：仍只记录 policy rollout 的 prompt 数量
+                    gen_batch_output.non_tensor_batch["__do_sample__"] = np.ones(len(gen_batch_output), dtype=bool) # J：将 policy rollout 的 __do_sample__ 标志位全部设为 True
+                    gen_baseline_batch = gen_batch.slice(0, None) # J：完整复制 gen_batch 以生成 baseline，注意 gen_batch 是没有复制过的（gen_batch_output 才是复制过的），数量跟原始 Batch size 一致(不是 Batch size * rollout_n)
+                    gen_baseline_batch.non_tensor_batch["__do_sample__"] = np.zeros(len(gen_baseline_batch), dtype=bool) # J：将 baseline 的 __do_sample__ 标志位全部设为 False
+                    # J：组合时，前面是 policy rollout，后面是 baseline rollout
+                    combined_gen_batch = DataProto.concat([gen_batch_output, gen_baseline_batch]) # J：合并生成请求，得到包含（batch_size * rollout_n + batch_size）大小的 DataProto 对象
+                    num_sampled_prompts = len(gen_batch_output) # J：仍只记录 policy rollout 的 prompt 数量，用于后续分离出除 baseline 外的采样样本
                 else:
                     combined_gen_batch = gen_batch_output
                     num_sampled_prompts = len(gen_batch_output)
@@ -1528,68 +1536,75 @@ class RayPPOTrainer:
                     with marked_timer("gen", timing_raw, color="red"): # J：开始生成阶段并记录生成时间，时间上报到 timing_raw 字典中 {"gen": 生成时间}
                         if curr_step_profile: # J：如果当前 step 开启了性能采集
                             self.llm_server_manager.start_profile() # J：开启 llm server 性能采集
-                        # J：生成序列（核心函数）
-                        combined_gen_output = self.async_rollout_manager.generate_sequences(combined_gen_batch) # J：核心函数，生成序列
+                        
+                        # J：TODO，Generate 的详细细节还需要再看看，尤其涉及到 Agent Loop 的部分
+                        combined_gen_output = self.async_rollout_manager.generate_sequences(combined_gen_batch) # J：核心函数，执行生成序列操作，这里是阻塞调用，会等待所有 rollout 引擎完成生成，再返回结果
                         self.checkpoint_manager.sleep_replicas() # J：把 rollout 引擎休眠，腾出显存给训练用
                         if curr_step_profile: # J：如果当前 step 开启了性能采集
                             self.llm_server_manager.stop_profile() # J：关闭 llm server 性能采集
 
+                        # J：TODO，问题，这里仅用 timing 作为 key，会导致不知道是不是 gen 阶段的吧？
                         timing_raw.update(combined_gen_output.meta_info["timing"]) # J：更新 timing_raw 字典，包含 llm Server 生成序列的时间
                         combined_gen_output.meta_info.pop("timing", None) # J：从 combined_gen_output 中移除 timing 字段（应该是避免其他不必要影响）
 
                     # J：这里理论上只有 REMAX 优势估计器中 combined_gen_output 会多出来 baseline ，其他优势估计器中 combined_gen_output 就是 gen_batch_output
-                    gen_batch_output = combined_gen_output.slice(0, num_sampled_prompts) # J：slice(start, end)
+                    gen_batch_output = combined_gen_output.slice(0, num_sampled_prompts) # J：slice(start, end)，提取 policy rollout 的输出
                     if "__do_sample__" in gen_batch_output.non_tensor_batch:
                         gen_batch_output.pop(non_tensor_batch_keys=["__do_sample__"]) # J：后续阶段不需要 __do_sample__（仅用于 REMAX 优势估计器生成区分 policy rollout 和 baseline） 这个字段了
 
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
-                        gen_baseline_output = combined_gen_output.slice(num_sampled_prompts, None)
+                        gen_baseline_output = combined_gen_output.slice(num_sampled_prompts, None) # J：slice(start, end)，提取 baseline rollout 的输出
                         if "__do_sample__" in gen_baseline_output.non_tensor_batch:
                             gen_baseline_output.pop(non_tensor_batch_keys=["__do_sample__"]) # J：后续阶段不需要 __do_sample__（仅用于 REMAX 优势估计器生成区分 policy rollout 和 baseline） 这个字段了
 
-                        if self.use_rm and "rm_scores" not in gen_baseline_output.batch.keys():
-                            baseline_reward = self._compute_reward_colocate(gen_baseline_output) # J：计算 reward score 并返回包含 rm_scores 张量和 reward_extra_info 字段的 DataProto 对象
-                            gen_baseline_output = gen_baseline_output.union(baseline_reward) # J：将 baseline_reward 合并到 gen_baseline_output 中
+                        if self.use_rm and "rm_scores" not in gen_baseline_output.batch.keys(): # J：如果使用 REMAX 优势估计器，且使用 Reward Model，且 baseline rollout 的输出中没有 rm_scores 张量
+                            # J：给 baseline rollout 计算 reward score
+                            baseline_reward = self._compute_reward_colocate(gen_baseline_output) # J：计算 reward score 并返回包含 rm_scores 张量和 reward_extra_info 字段的 DataProto 对象，注：仅每个样本的最后一个 Response token 被赋值，其余 Token 都是 0
+                            gen_baseline_output = gen_baseline_output.union(baseline_reward) # J：将 baseline_reward 合并到 gen_baseline_output 中(不是按照行合并，是按照 key 合并)，合并后就有了 “rm_scores” 张量
 
-                        reward_baseline_tensor = gen_baseline_output.batch["rm_scores"].sum(dim=-1)
-                        batch.batch["reward_baselines"] = reward_baseline_tensor
+                        reward_baseline_tensor = gen_baseline_output.batch["rm_scores"].sum(dim=-1) # J：对 baseline rollout 的 rm_scores 张量进行求和，得到每个 prompt 的 reward score，注：一般来说，RLHF 中，仅每个样本的最后一个 Response token 被赋值，其余 Token 都是 0，实际上就是取了最后一个 Response token 的 reward score
+                        batch.batch["reward_baselines"] = reward_baseline_tensor # J：将 reward score 赋值给 batch 中的 reward_baselines 字段
 
-                        del gen_baseline_output
-                    del combined_gen_batch, combined_gen_output
+                        del gen_baseline_output # J：删除 baseline rollout 的输出，避免占用显存
+                    del combined_gen_batch, combined_gen_output # J：删除 combined_gen_batch 和 combined_gen_output，避免占用显存
                     # repeat to align with repeated responses in rollout
-                    batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True) # J：将 batch 中的 tensor 重复 rollout_n 次，每个 tensor 都会逐元素重复
-                    batch = batch.union(gen_batch_output) # J：将 gen_batch_output 合并到 batch 中，与 batch 中的 tensor 一一对应（注意：是 repeated batch 数量才对得上）
+                    batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True) # J：将 batch 中的 tensor 重复 rollout_n 次，每个 tensor 都会逐元素重复，用于跟 policy rollout 数量（gen_batch_output）对齐
+                    batch = batch.union(gen_batch_output) # J：将 gen_batch_output 按照列合并到 batch 中，与 batch 中的 tensor 一一对应（注意：是 repeated batch 数量才对得上）
 
                     if "response_mask" not in batch.batch.keys():
-                        batch.batch["response_mask"] = compute_response_mask(batch)
+                        batch.batch["response_mask"] = compute_response_mask(batch) # J：计算 Response 部分的注意力掩码，读取 batch.batch["attention_mask"]
                     # Balance the number of valid tokens across DP ranks.
                     # NOTE: This usually changes the order of data in the `batch`,
                     # which won't affect the advantage calculation (since it's based on uid),
                     # but might affect the loss calculation (due to the change of mini-batching).
-                    # J：TODO：
-                    if self.config.trainer.balance_batch:
-                        self._balance_batch(batch, metrics=metrics)
+
+                    if self.config.trainer.balance_batch: # J：当前一般是打开的
+                        self._balance_batch(batch, metrics=metrics) # J：平衡每个 DP rank 上的 token 数量, 并更新 metrics 中 sequence length 不平衡相关的指标
 
                     # compute global_valid tokens
-                    batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
+                    batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist() # J：计算每个样本的有效 token 数量，维度为 [batch_size*rollout_n]
                     # get images_seqlens
                     images_seqlens_all = []
-                    for multi_modal_input in batch.non_tensor_batch["multi_modal_inputs"]:
-                        if "image_grid_thw" not in multi_modal_input.keys():
+                    # non_tensor_batch["multi_modal_inputs"] 是一个 list, 每个样本一个的 dict
+                    for multi_modal_input in batch.non_tensor_batch["multi_modal_inputs"]: # J：遍历每个样本的 multi_modal_inputs 字段，for 多模态输入
+                        # J：image_grid_thw[:, 0] → 每张图的帧数 T
+                        # J：image_grid_thw[:, 1] * image_grid_thw[:, 2] → 每张图的 H*W （一帧的 patch 数）
+                        if "image_grid_thw" not in multi_modal_input.keys(): # J：跳过纯文本样本
                             continue
-                        images_seqlens_all.extend(multi_modal_input["images_seqlens"].tolist())
-                    batch.meta_info["images_seqlens"] = images_seqlens_all
+                        # J：images_seqlens 是 派生量 ，每帧的视觉 token 数（= H×W），可用于后续统计视觉 token 数量，计算视觉 FLOPs 需要
+                        images_seqlens_all.extend(multi_modal_input["images_seqlens"].tolist()) # J：将每个样本的 images_seqlens 列表添加到 images_seqlens_all 中
+                    batch.meta_info["images_seqlens"] = images_seqlens_all # J：将 images_seqlens_all 赋值给 batch.meta_info["images_seqlens"] 字段
                     with marked_timer("reward", timing_raw, color="yellow"):
                         # compute reward model score
                         if self.use_rm and "rm_scores" not in batch.batch.keys():
-                            batch_reward = self._compute_reward_colocate(batch)
-                            batch = batch.union(batch_reward)
+                            batch_reward = self._compute_reward_colocate(batch) # J：计算 reward score 并返回包含 rm_scores 张量和 reward_extra_info 字段的 DataProto 对象，注：仅每个样本的最后一个 Response token 被赋值，其余 Token 都是 0
+                            batch = batch.union(batch_reward) # J：将 batch_reward 合并到 batch 中(不是按照行合并，是按照 key 合并)，合并后就有了 “rm_scores” 张量
 
                         # extract reward_tensor and reward_extra_infos_dict for training
-                        reward_tensor, reward_extra_infos_dict = extract_reward(batch)
+                        reward_tensor, reward_extra_infos_dict = extract_reward(batch) # J：从 batch 中提取 reward_tensor（"rm_scores"） 和 reward_extra_infos_dict（meta_info["reward_extra_keys"] 对应的 non_tensor_batch 中的数据） 字段
 
                     # Operating Mode Selection:
-                    # - Bypass mode: Sets old_log_probs = rollout_log_probs (2 policies: π_rollout, π_θ)
+                    # - Bypass mode: Sets old_log_probs = rollout_log_probs (2 policies: π_rollout, π_θ) # J：没有 π_old
                     # - Decoupled mode: Recomputes old_log_probs as proximal anchor (3 policies: π_rollout, π_old, π_θ)
                     #   Note: π_old computed once per data batch, serves as stable reference during mini-batch updates
                     rollout_corr_config = self.config.algorithm.get("rollout_correction", None)
@@ -1597,18 +1612,18 @@ class RayPPOTrainer:
                     if bypass_recomputing_logprobs:  # Use `rollout_log_probs`
                         from verl.trainer.ppo.rollout_corr_helper import apply_bypass_mode
 
-                        apply_bypass_mode( # J：应用 bypass 模式，将 old_log_probs 设置为 rollout_log_probs
+                        apply_bypass_mode( # J：应用 bypass 模式，此时是直接设置 old_log_probs = rollout_log_probs，回填到 batch["old_log_probs"] 字段
                             batch=batch,
                             rollout_corr_config=rollout_corr_config,
                             policy_loss_config=self.config.actor_rollout_ref.actor.policy_loss,
                         )
                     else:  # Recompute old_log_probs； J：重新计算 old_log_probs，作为 proximal anchor
                         with marked_timer("old_log_prob", timing_raw, color="blue"):
-                            old_log_prob, old_log_prob_mfu = self._compute_old_log_prob(batch)
+                            old_log_prob, old_log_prob_mfu = self._compute_old_log_prob(batch) # J：计算 old_log_probs，包含 ”entropy" 字段和 “old_log_probs” 字段 等
                             entropys = old_log_prob.batch["entropys"]
                             response_masks = batch.batch["response_mask"]
                             actor_config = self.config.actor_rollout_ref.actor
-                            entropy_agg = agg_loss(
+                            entropy_agg = agg_loss( # J：聚合 entropy（根据 loss_agg_mode 聚合，类似 loss 聚合一样）
                                 loss_mat=entropys,
                                 loss_mask=response_masks,
                                 loss_agg_mode=actor_config.loss_agg_mode,
@@ -1633,15 +1648,15 @@ class RayPPOTrainer:
                                 # TODO: we may want to add diff of probs too.
                                 from verl.utils.debug.metrics import calculate_debug_metrics
 
-                                metrics.update(calculate_debug_metrics(batch))
+                                metrics.update(calculate_debug_metrics(batch)) # J：计算 rollout vs actor logprobs 相关指标，用于调试（这个 diff 不能太大）
 
-                    assert "old_log_probs" in batch.batch, f'"old_log_prob" not in {batch.batch.keys()=}'
+                    assert "old_log_probs" in batch.batch, f'"old_log_prob" not in {batch.batch.keys()=}' # J：计算完成后需要确保 old_log_probs 存在
 
                     if self.use_reference_policy:
                         # compute reference log_prob
-                        with marked_timer(str(Role.RefPolicy), timing_raw, color="olive"):
-                            ref_log_prob = self._compute_ref_log_prob(batch)
-                            batch = batch.union(ref_log_prob)
+                        with marked_timer(str(Role.RefPolicy), timing_raw, color="olive"): # J：计算 "ref"
+                            ref_log_prob = self._compute_ref_log_prob(batch) # J：计算 "ref" 的 log_probs，回填到 batch["ref_log_prob"] 字段
+                            batch = batch.union(ref_log_prob) # J：将 "ref" 的 log_probs 合并到 batch 中，添加 ["ref_log_prob"] 字段
 
                     # compute values
                     if self.use_critic:

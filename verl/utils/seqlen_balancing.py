@@ -254,7 +254,7 @@ def get_seqlen_balanced_partitions(seqlen_list: list[int], k_partitions: int, eq
     return _check_and_sort_partitions(partitions)
 
 
-def log_seqlen_unbalance(seqlen_list: list[int], partitions: list[list[int]], prefix):
+def log_seqlen_unbalance(seqlen_list: list[int], partitions: list[list[int]], prefix): # J：计算并记录 sequence length 不平衡相关的指标
     """
     Calculate and log metrics related to sequence length imbalance before and after partitioning.
 

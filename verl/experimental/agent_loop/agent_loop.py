@@ -85,7 +85,7 @@ class AgentLoopMetrics(BaseModel):
     num_preempted: int = -1  # -1 means not available
 
 
-class AgentLoopOutput(BaseModel):
+class AgentLoopOutput(BaseModel): # J：定义 AgentLoop 输出的数据，多轮和单轮共享该类
     """Agent loop output."""
 
     prompt_ids: list[int]
@@ -102,7 +102,7 @@ class AgentLoopOutput(BaseModel):
     """Multi-modal data for multi-modal tools."""
     reward_score: Optional[float] = None
     """Reward score for the trajectory."""
-    num_turns: int = 0
+    num_turns: int = 0 # J：对话轮数，包括用户、助手、工具调用等
     """Number of chat turns, including user, assistant, tool."""
     metrics: AgentLoopMetrics
     """Auxiliary performance metrics"""
@@ -225,7 +225,7 @@ class AgentLoopBase(ABC):
         self.mm_processor_kwargs = self.data_config.get("mm_processor_kwargs", {})
         processing_class = self.processor if self.processor is not None else self.tokenizer
         self.system_prompt = initialize_system_prompt(processing_class, **self.apply_chat_template_kwargs)
-        self.loop = get_event_loop()
+        self.loop = get_event_loop() # J：获取当前线程的 event loop，注意不是 Agent Loop，两者完全不同
 
     def _get_mm_processor_kwargs(self, audio_data: Optional[list[Any]] = None) -> dict[str, Any]:
         mm_processor_kwargs = dict(self.mm_processor_kwargs or {})
@@ -235,11 +235,11 @@ class AgentLoopBase(ABC):
                 mm_processor_kwargs["sampling_rate"] = int(sampling_rate)
         return mm_processor_kwargs
 
-    async def process_vision_info(self, messages: list[dict]) -> dict:
+    async def process_vision_info(self, messages: list[dict]) -> dict: # J：处理 multimodal 输入，提取图像，视频，音频信息
         """Backward-compatible wrapper for multi-modal extraction."""
-        return await self.process_multi_modal_info(messages)
+        return await self.process_multi_modal_info(messages) # J：提取图像，视频，音频信息
 
-    async def process_multi_modal_info(self, messages: list[dict]) -> dict:
+    async def process_multi_modal_info(self, messages: list[dict]) -> dict: # J：处理 multimodal 输入，提取图像，视频，音频信息
         """Extract images, videos and audios from messages.
 
         Args:
@@ -252,7 +252,7 @@ class AgentLoopBase(ABC):
         if self.processor is not None:
             image_patch_size = getattr(getattr(self.processor, "image_processor", None), "patch_size", 14)
             if hasattr(self.dataset_cls, "process_multi_modal_info"):
-                images, videos, audios = await self.dataset_cls.process_multi_modal_info(
+                images, videos, audios = await self.dataset_cls.process_multi_modal_info( # J：处理 multimodal 输入，提取图像，视频，音频信息
                     messages, image_patch_size=image_patch_size, config=self.data_config
                 )
             else:
@@ -267,9 +267,9 @@ class AgentLoopBase(ABC):
             if audios is not None:
                 multi_modal_data["audios"] = audios
 
-        return multi_modal_data
+        return multi_modal_data # J：返回 multimodal 输入，包含图像，视频，音频信息
 
-    async def apply_chat_template(
+    async def apply_chat_template( # J：应用 chat template 到 messages，获取 prompts_ids
         self,
         messages: list[dict],
         tools: list[dict] = None,
@@ -291,20 +291,20 @@ class AgentLoopBase(ABC):
         Returns:
             list[int]: Prompt token ids.
         """
-        if self.processor is not None:
-            raw_prompt = await self.loop.run_in_executor(
+        if self.processor is not None: # J：如果有 processor，说明是 multimodal 模型，需分两步处理
+            raw_prompt = await self.loop.run_in_executor( # J：这里的 loop 是当前线程的 event loop，不是 Agent Loop，两者完全不同
                 None,
-                lambda: apply_chat_template(
+                lambda: apply_chat_template( # J：应用 chat template 到 messages，获取 prompts
                     self.processor,
                     messages,
                     tools=tools,
                     add_generation_prompt=True,
-                    tokenize=False,
+                    tokenize=False, # J：不执行 tokenization，直接返回 prompts
                     **self.apply_chat_template_kwargs,
                 ),
             )
 
-            model_inputs = build_multimodal_processor_inputs(
+            model_inputs = build_multimodal_processor_inputs( # J：构建 multimodal 输入
                 self.processor,
                 text=[raw_prompt],
                 images=images,
@@ -314,8 +314,8 @@ class AgentLoopBase(ABC):
                 if mm_processor_kwargs is not None
                 else self._get_mm_processor_kwargs(audios),
             )
-            prompt_ids = normalize_token_ids(model_inputs.pop("input_ids"))
-        else:
+            prompt_ids = normalize_token_ids(model_inputs.pop("input_ids")) # J：将各种格式的分词结果，转换为统一的平铺的 token ids 列表
+        else: # J：纯文本 apply chat template 到 messages，获取 prompts
             tokenized_prompt = await self.loop.run_in_executor(
                 None,
                 lambda: apply_chat_template(
@@ -327,19 +327,19 @@ class AgentLoopBase(ABC):
                     **self.apply_chat_template_kwargs,
                 ),
             )
-            prompt_ids = normalize_token_ids(tokenized_prompt)
+            prompt_ids = normalize_token_ids(tokenized_prompt) # J：将各种格式的分词结果，转换为统一的平铺的 token ids 列表
 
-        if remove_system_prompt:
-            prompt_ids = prompt_ids[len(self.system_prompt) :]
+        if remove_system_prompt: # J：若打开移除 system prompt 开关
+            prompt_ids = prompt_ids[len(self.system_prompt) :] # J：移除 system prompt
 
         # Mirror the response-side ``response_ids[:response_length]`` cap on the prompt side:
         # every prompt produced by the agent loop must fit in ``rollout.prompt_length`` so that
         # ``_pad_token_ids`` (and downstream ``torch.cat``) can rely on uniform shapes.
         # Multimodal prompts cannot be sliced here because placeholder tokens must remain
         # aligned 1:1 with ``multi_modal_inputs`` features, so we fail loudly instead.
-        prompt_length = self.rollout_config.prompt_length
-        if len(prompt_ids) > prompt_length:
-            if images or videos or audios:
+        prompt_length = self.rollout_config.prompt_length # J：获取 rollout 配置中的 prompt_length
+        if len(prompt_ids) > prompt_length: # J：若 prompt 长度超过 prompt_length
+            if images or videos or audios: # J：若有任何图片，视频，音频输入，直接抛出异常，此时无法截断 prompt
                 raise ValueError(
                     f"Multimodal prompt produced {len(prompt_ids)} tokens, exceeding "
                     f"rollout.prompt_length={prompt_length}. Truncating multimodal token "
@@ -353,9 +353,9 @@ class AgentLoopBase(ABC):
                 len(prompt_ids),
                 prompt_length,
             )
-            prompt_ids = prompt_ids[-prompt_length:]
+            prompt_ids = prompt_ids[-prompt_length:] # J：对于不包含任何图片，视频，音频的 prompt，截断 prompt 到 prompt_length
 
-        return prompt_ids
+        return prompt_ids # J：返回 prompt ids
 
     @abstractmethod
     async def run(self, sampling_params: dict[str, Any], **kwargs) -> AgentLoopOutput:
@@ -379,18 +379,20 @@ https://hydra.cc/docs/advanced/instantiate_objects/overview/
 _agent_loop_registry: dict[str, dict] = {}
 
 
-def register(agent_name: str):
+def register(agent_name: str): # J: 注册 agent_loop 类的装饰器
     """Register agent loop class."""
 
     def decorator(subclass: type[AgentLoopBase]) -> type[AgentLoopBase]:
-        fqdn = f"{subclass.__module__}.{subclass.__qualname__}"
-        _agent_loop_registry[agent_name] = {"_target_": fqdn}
+        # J: subclass.__module__：获取该类所在的模块名（例如 my_package.my_module）
+        # J: subclass.__qualname__：获取该类的限定名称（如果是嵌套类，会包含父类名，例如 OuterClass.InnerClass；普通类就是类名本身）
+        fqdn = f"{subclass.__module__}.{subclass.__qualname__}" # J：fqdn 是 Fully Qualified Domain Name 的缩写（完全限定域名名称）
+        _agent_loop_registry[agent_name] = {"_target_": fqdn} # J: 注册 agent_loop 类到注册表 _agent_loop_registry 中, key 是 agent_name, value 是 yaml 配置格式（_target_: agent_loop 类的 fqdn），用于初始化 agent_loop 实例时使用
         return subclass
 
     return decorator
 
 
-class AgentLoopWorker:
+class AgentLoopWorker: # J：一般被注册为远程 Actor，用于并行处理多个消息，且会被 AgentLoopManager 持有多个对象，以实现并行处理多个 Batch
     """Agent loop worker takes a batch of messages and run each message in an agent loop.
 
     Args:
@@ -416,44 +418,44 @@ class AgentLoopWorker:
         self.rollout_config: RolloutConfig = omega_conf_to_dataclass(rollout_config)
         self.model_config: HFModelConfig = omega_conf_to_dataclass(model_config)
 
-        self.dataset_cls = get_dataset_class(config.data)
+        self.dataset_cls = get_dataset_class(config.data) # J：根据 config.data 中的 dataset 类型，获取对应的 dataset 类名，默认是 RLHFDataset
         self.tokenizer = self.model_config.tokenizer
         self.processor = self.model_config.processor
         self.mm_processor_kwargs = config.data.get("mm_processor_kwargs", {})
 
         # Online policy distillation
-        self.distillation_enabled = is_distillation_enabled(config.distillation)
+        self.distillation_enabled = is_distillation_enabled(config.distillation) # J：判断是否开启了 distillation 功能
         if self.distillation_enabled:
             from verl.experimental.teacher_loop.teacher_manager import AsyncTeacherLLMServerManager
 
             self.teacher_key: str = config.distillation.teacher_key
-            self.teacher_server_manager = AsyncTeacherLLMServerManager(
+            self.teacher_server_manager = AsyncTeacherLLMServerManager( # J：初始化 AsyncTeacherLLMServerManager 实例，用于管理 Teacher Server
                 config=config,
                 teacher_client=teacher_client,
             )
 
         # Load tools once per worker; each trajectory just reuses self.tools.
-        tool_config_path = self.rollout_config.multi_turn.tool_config_path
-        function_tool_path = self.rollout_config.multi_turn.function_tool_path
-        self.tools = load_all_tools(
+        tool_config_path = self.rollout_config.multi_turn.tool_config_path # J：获取 rollout_config 中的 tool_config_path 配置项，用于加载工具配置
+        function_tool_path = self.rollout_config.multi_turn.function_tool_path # J：获取 rollout_config 中的 function_tool_path 配置项，用于加载函数工具配置
+        self.tools = load_all_tools( # J：加载所有工具，包括 NativeTool 和 FunctionTool
             tool_config_path=resolve_config_path(tool_config_path) if tool_config_path else None,
             function_tool_path=resolve_config_path(function_tool_path) if function_tool_path else None,
         )
 
         # Load custom agent loop implementations from config path
-        agent_loop_config_path = self.rollout_config.agent.agent_loop_config_path
-        if agent_loop_config_path:
+        agent_loop_config_path = self.rollout_config.agent.agent_loop_config_path # J：获取 rollout_config 中的 agent_loop_config_path 配置项，用于加载自定义 agent_loop 实现
+        if agent_loop_config_path: # J：如果指定了 agent_loop_config_path 配置项
             resolved_path = resolve_config_path(agent_loop_config_path)
             agent_loop_configs = OmegaConf.load(resolved_path)
             for agent_loop_config in agent_loop_configs:
-                _agent_loop_registry[agent_loop_config.name] = agent_loop_config
+                _agent_loop_registry[agent_loop_config.name] = agent_loop_config # J：注册 agent_loop 类到注册表 _agent_loop_registry 中, key 是 agent_name, value 是 yaml 配置格式
         if self.model_config.get("custom_chat_template", None) is not None:
             if self.model_config.processor is not None:
-                self.model_config.processor.chat_template = self.model_config.custom_chat_template
-            self.model_config.tokenizer.chat_template = self.model_config.custom_chat_template
+                self.model_config.processor.chat_template = self.model_config.custom_chat_template # J：设置 processor 的 chat_template 为自定义的 chat_template
+            self.model_config.tokenizer.chat_template = self.model_config.custom_chat_template # J：设置 tokenizer 的 chat_template 为自定义的 chat_template
 
         trace_config = self.rollout_config.trace
-        RolloutTraceConfig.init(
+        RolloutTraceConfig.init( # J：初始化 RolloutTraceConfig 实例，用于配置 rollout trace 的参数
             self.rollout_config.trace.project_name,
             self.rollout_config.trace.experiment_name,
             trace_config.get("backend"),
@@ -470,7 +472,7 @@ class AgentLoopWorker:
                 mm_processor_kwargs["sampling_rate"] = int(sampling_rate)
         return mm_processor_kwargs
 
-    async def generate_sequences(self, batch: DataProto) -> DataProto:
+    async def generate_sequences(self, batch: DataProto) -> DataProto: # J：AgentLoopWorker 的生成序列函数
         """Generate sequences from agent loop.
 
         Args:
@@ -492,53 +494,53 @@ class AgentLoopWorker:
             response_mask: | 1, 1, 1, ..., 1, 1 | 0, 0, .., 0, 0 | 1, 1, 1, ..., 1, 1 | 0, 0, ..., 0|
         """
         config = self.rollout_config
-        validate = batch.meta_info.get("validate", False)
-        sampling_params = dict(
+        validate = batch.meta_info.get("validate", False) # J：是否进行验证
+        sampling_params = dict( # J：构造采样参数
             temperature=config.temperature,
             top_p=config.top_p,
             top_k=config.top_k,
             repetition_penalty=1.0,
-            logprobs=config.calculate_log_probs,
+            logprobs=config.calculate_log_probs, # J：是否计算 log 概率，Bool 类型
         )
 
-        def apply_greedy_sampling_params(params: dict[str, Any]) -> None:
+        def apply_greedy_sampling_params(params: dict[str, Any]) -> None: # J：应用贪心采样参数, 即 top_p=1.0, top_k=-1, temperature=0
             params["top_p"] = 1.0
             params["top_k"] = -1
             params["temperature"] = 0
 
         # override sampling params for validation
-        if validate:
+        if validate: # J：如果进行验证，重写采样参数？
             sampling_params["top_p"] = config.val_kwargs.top_p
             sampling_params["top_k"] = config.val_kwargs.top_k
             sampling_params["temperature"] = config.val_kwargs.temperature
 
         # by default, we assume it's a single turn agent
-        if "agent_name" not in batch.non_tensor_batch:
-            default_agent_loop = config.agent.default_agent_loop
-            batch.non_tensor_batch["agent_name"] = np.array([default_agent_loop] * len(batch), dtype=object)
+        if "agent_name" not in batch.non_tensor_batch: # J：如果没有指定 agent_name，就使用默认的 agent_loop
+            default_agent_loop = config.agent.default_agent_loop # J：默认值为 "single_turn_agent"（单轮对话），详情见 config 文件（config.yaml 中可能未配置），进一步见 verl.workers.config.rollout.AgentLoopConfig.default_agent_loop（也可见 verl.workers.config.AgentLoopConfig.default_agent_loop）
+            batch.non_tensor_batch["agent_name"] = np.array([default_agent_loop] * len(batch), dtype=object) # J：将默认的 agent_loop 赋值给每个样本相同的 agent_name，实际上每个样本可以在数据中指定不同的 agent_loop
 
-        if "index" in batch.non_tensor_batch:
-            index = batch.non_tensor_batch["index"]
+        if "index" in batch.non_tensor_batch: # J：如果有 index，就使用 index 作为采样的样本索引
+            index = batch.non_tensor_batch["index"] # J：获取 batch 中的 index 列，注意同一个 Prompt 的不同 rollout 共享同一个 index，repeat 后的 index 类似 [s0, s0, s0, s1, s1, s1, s2, s2, s2, ...]
         else:
-            index = np.arange(len(batch))
+            index = np.arange(len(batch)) # J：默认的 index 从 0 开始，步长为 1，范围为 batch 大小
 
-        max_samples_per_worker = RolloutTraceConfig.get_instance().max_samples_per_step_per_worker
+        max_samples_per_worker = RolloutTraceConfig.get_instance().max_samples_per_step_per_worker # J：每个 worker 最大采样的样本数
 
         # For n rollouts per sample, we trace all n rollouts for selected samples
         # Note: This sampling happens per-worker, so total traces = max_samples_per_worker * num_workers * n
         if max_samples_per_worker is not None:
-            unique_sample_indices = np.unique(index)
-            if max_samples_per_worker < len(unique_sample_indices):
-                selected_samples = set(
+            unique_sample_indices = np.unique(index) # J：获取唯一的样本索引（同一个 Prompt 的不同 rollout 共享同一个 index）
+            if max_samples_per_worker < len(unique_sample_indices): # J：如果最大采样的样本数小于等于唯一的样本索引数
+                selected_samples = set( # J：随机选择 max_samples_per_worker 个唯一的样本索引 (可能导致数据丢失)
                     np.random.choice(unique_sample_indices, max_samples_per_worker, replace=False).tolist()
                 )
-                traced_indices = set(i for i in range(len(batch)) if index[i] in selected_samples)
+                traced_indices = set(i for i in range(len(batch)) if index[i] in selected_samples) # J：获取选中的样本索引
             else:
-                traced_indices = set(range(len(batch)))
+                traced_indices = set(range(len(batch))) # J：如果最大采样的样本数大于唯一的样本索引数，就采样所有样本
         else:
-            traced_indices = set(range(len(batch)))
+            traced_indices = set(range(len(batch))) # J：如果没有指定最大采样的样本数，就采样所有样本
 
-        trajectory_info = await get_trajectory_info(
+        trajectory_info = await get_trajectory_info( # J: list of dict:{"step": step, "sample_index": index[i], "rollout_n": rollout_n, "validate": validate}, rollout_n 指示当前样本是同一个 Prompt 的第几个 rollout
             batch.meta_info.get("global_steps", -1), index.tolist(), batch.meta_info.get("validate", False)
         )
 
@@ -550,30 +552,31 @@ class AgentLoopWorker:
             trace_this_sample = i in traced_indices
             kwargs = {k: v[i] for k, v in batch.non_tensor_batch.items() if k != "__do_sample__"}
             sample_sampling_params = dict(sampling_params)
+            # J: 特别注意，不存在 __do_sample__ 时，不使用贪心采样参数，这里仅仅是用于 REMAX combined rollout 中，通过 __do_sample__ 存在且为 False 来识别 baseline 样本
             if not validate and per_sample_do_sample is not None and not bool(per_sample_do_sample[i]):
-                apply_greedy_sampling_params(sample_sampling_params)
+                apply_greedy_sampling_params(sample_sampling_params) # J：如果当前样本不是验证样本，且 __do_sample__ 存在，且 __do_sample__ 为 False，就应用贪心采样参数
             tasks.append(
-                asyncio.create_task(
+                asyncio.create_task( # J: 提交给事件循环并发执行，注意是立即后台巡行，调用后返回一个 <Task pending> 对象
                     self._run_agent_loop(sample_sampling_params, trajectory_info[i], trace=trace_this_sample, **kwargs)
                 )
             )
-        outputs = await asyncio.gather(*tasks)
+        outputs = await asyncio.gather(*tasks) # J: 等待所有任务完成，返回一个 list of _InternalAgentLoopOutput 对象
 
-        output = self._postprocess(
+        output = self._postprocess( # J：对 agent_loop 的输出进行后处理，返回一个 DataProto 对象
             outputs, input_non_tensor_batch=batch.non_tensor_batch, validate=batch.meta_info.get("validate", False)
         )
-        return output
+        return output # J：返回 DataProto 对象
 
-    async def _run_agent_loop(
+    async def _run_agent_loop( # J: 运行 agent_loop
         self,
         sampling_params: dict[str, Any],
         trajectory: dict[str, Any],
-        *,
+        *, # J：* 前面的参数可以按照位置传递，但 * 后面的参数必须是关键字参数
         agent_name: str,
         trace: bool = True,
         **kwargs,
-    ) -> _InternalAgentLoopOutput:
-        with rollout_trace_attr(
+    ) -> _InternalAgentLoopOutput: # J：返回一个 _InternalAgentLoopOutput 对象
+        with rollout_trace_attr( # J: 追踪 rollout 的属性
             step=trajectory["step"],
             sample_index=trajectory["sample_index"],
             rollout_n=trajectory["rollout_n"],
@@ -581,12 +584,12 @@ class AgentLoopWorker:
             name="agent_loop",
             trace=trace,
         ):
-            assert agent_name in _agent_loop_registry, (
+            assert agent_name in _agent_loop_registry, ( # J: 确保 agent_loop 已经注册
                 f"Agent loop {agent_name} not registered, registered agent loops: {_agent_loop_registry.keys()}"
             )
 
-            agent_loop_config = _agent_loop_registry[agent_name]
-            agent_loop = hydra.utils.instantiate(
+            agent_loop_config = _agent_loop_registry[agent_name] # J：获取 agent_loop 的 绝对路径
+            agent_loop = hydra.utils.instantiate( # J: 实例化 agent_loop 类
                 config=agent_loop_config,
                 trainer_config=DictConfigWrap(config=self.config),
                 server_manager=self.llm_client,
@@ -596,8 +599,8 @@ class AgentLoopWorker:
                 data_config=DictConfigWrap(self.config.data),
                 tools=ToolListWrap(self.tools),
             )
-            output: AgentLoopOutput = await agent_loop.run(sampling_params, **kwargs)
-            return await self._agent_loop_postprocess(output, trajectory["validate"], **kwargs)
+            output: AgentLoopOutput = await agent_loop.run(sampling_params, **kwargs) # J：运行 agent_loop
+            return await self._agent_loop_postprocess(output, trajectory["validate"], **kwargs) # J：对 agent_loop 的输出进行后处理
 
     def _pad_token_ids(
         self,
@@ -622,7 +625,7 @@ class AgentLoopWorker:
                 padded["attention_mask"] = padded["attention_mask"].unsqueeze(0)
         return padded
 
-    async def _agent_loop_postprocess(self, output, validate, **kwargs) -> _InternalAgentLoopOutput:
+    async def _agent_loop_postprocess(self, output, validate, **kwargs) -> _InternalAgentLoopOutput: # J：对 agent_loop 的输出进行后处理
         """Perform post-processing operations on the output of each individual agent loop."""
         output.extra_fields["raw_prompt"] = kwargs["raw_prompt"]
 
@@ -677,17 +680,18 @@ class AgentLoopWorker:
         attention_mask = torch.cat([prompt_output["attention_mask"], response_output["attention_mask"]], dim=1)
         input_ids = torch.cat([prompt_output["input_ids"], response_output["input_ids"]], dim=1)
 
+        # J：TOOD，继续阅读
         routed_experts = None
-        if output.routed_experts is not None:
+        if output.routed_experts is not None: # J：如果 output 中包含 routed_experts
             total_length = input_ids.shape[1]
             length, layer_num, topk_num = output.routed_experts.shape
-            if isinstance(output.routed_experts, np.ndarray):
-                routed_experts_array = output.routed_experts
-                if not routed_experts_array.flags.writeable:
-                    routed_experts_array = routed_experts_array.copy()
-                experts_tensor = torch.from_numpy(routed_experts_array)
-            elif isinstance(output.routed_experts, torch.Tensor):
-                experts_tensor = output.routed_experts
+            if isinstance(output.routed_experts, np.ndarray): # J：如果 routed_experts 是 numpy 数组
+                routed_experts_array = output.routed_experts # J：读取 routed_experts 数组
+                if not routed_experts_array.flags.writeable: # J：如果 routed_experts 数组不可写
+                    routed_experts_array = routed_experts_array.copy() # J：复制 routed_experts 数组
+                experts_tensor = torch.from_numpy(routed_experts_array) # J：将 routed_experts 数组转换为 torch.Tensor
+            elif isinstance(output.routed_experts, torch.Tensor): # J：如果 routed_experts 是 torch.Tensor
+                experts_tensor = output.routed_experts # J：如果 routed_experts 是 torch.Tensor，直接使用 routed_experts
             else:
                 raise TypeError(f"Unsupported type for routed_experts: {type(output.routed_experts)}")
             routed_experts = torch.zeros(1, total_length, layer_num, topk_num, dtype=experts_tensor.dtype)
@@ -836,7 +840,7 @@ class AgentLoopWorker:
         position_ids = torch.cat((text_position_ids, vision_position_ids), dim=1)  # (1, 4, seq_length)
         return position_ids
 
-    async def _compute_score(self, outputs: list[AgentLoopOutput], kwargs: dict) -> None:
+    async def _compute_score(self, outputs: list[AgentLoopOutput], kwargs: dict) -> None: # J: 计算奖励分数
         """Compute reward score for all outputs in a trajectory; assigns result to outputs[-1]."""
         enable_async_reward = self.reward_loop_worker_handles is not None
 
@@ -925,7 +929,7 @@ class AgentLoopWorker:
             output.extra_fields["teacher_ids"] = teacher_ids
             output.extra_fields["teacher_logprobs"] = teacher_logprobs
 
-    def _postprocess(
+    def _postprocess( # J：后处理函数，返回 DataProto 对象
         self,
         inputs: list[_InternalAgentLoopOutput],
         input_non_tensor_batch: dict | None = None,
@@ -964,20 +968,20 @@ class AgentLoopWorker:
         scores = [input.reward_score for input in inputs]
         if all(score is not None for score in scores):
             prompt_length = prompt_ids.size(1)
-            response_length = attention_mask[:, prompt_length:].sum(dim=1) - 1
-            rm_scores = torch.zeros_like(response_mask, dtype=torch.float32)
-            rm_scores[torch.arange(response_mask.size(0)), response_length] = torch.tensor(scores, dtype=torch.float32)
-            batch["rm_scores"] = rm_scores
+            response_length = attention_mask[:, prompt_length:].sum(dim=1) - 1 # J：计算每个样本的响应长度（不包含 prompt_ids），注意：Per sample 不一样
+            rm_scores = torch.zeros_like(response_mask, dtype=torch.float32) # J：初始化 rm_scores 为 0
+            rm_scores[torch.arange(response_mask.size(0)), response_length] = torch.tensor(scores, dtype=torch.float32) # J：将 reward_score 赋值给 rm_scores 中的最后一个 token
+            batch["rm_scores"] = rm_scores # J：将 rm_scores 添加到 batch 中
 
         non_tensor_batch = {
-            "__num_turns__": np.array([input.num_turns for input in inputs], dtype=np.int32),
+            "__num_turns__": np.array([input.num_turns for input in inputs], dtype=np.int32), # J：每个样本的轮数
         }
         if self.reward_loop_worker_handles is None and input_non_tensor_batch:
-            non_tensor_batch.update(input_non_tensor_batch)
+            non_tensor_batch.update(input_non_tensor_batch) # J：更新 non_tensor_batch 字典
 
         # add reward_extra_info to non_tensor_batch
         reward_extra_infos = [input.extra_fields.get("reward_extra_info", {}) for input in inputs]
-        reward_extra_keys = list(reward_extra_infos[0].keys())
+        reward_extra_keys = list(reward_extra_infos[0].keys()) # J：获取第一个样本的 reward_extra_info 中的所有键名
         for key in reward_extra_keys:
             non_tensor_batch[key] = np.array([info[key] for info in reward_extra_infos])
 
@@ -997,29 +1001,29 @@ class AgentLoopWorker:
             "max_global_steps",
             "extras",
         }
-        all_keys = set(key for input_item in inputs for key in input_item.extra_fields) | default_extra_keys
-        for key in all_keys:
-            temp_arr = np.empty(len(inputs), dtype=object)
-            temp_arr[:] = [input.extra_fields.get(key) for input in inputs]
-            extra_fields[key] = temp_arr
+        all_keys = set(key for input_item in inputs for key in input_item.extra_fields) | default_extra_keys # J：获取所有样本的 extra_fields 中的所有键名，包括默认的键名
+        for key in all_keys: # J：遍历所有键名
+            temp_arr = np.empty(len(inputs), dtype=object) # J：初始化一个与 inputs 等长的数组，用于存储每个样本的 extra_fields 中的值
+            temp_arr[:] = [input.extra_fields.get(key) for input in inputs] # J：将每个样本的 extra_fields 中的值赋值给 temp_arr
+            extra_fields[key] = temp_arr # J：将 temp_arr 添加到 extra_fields 字典中
 
-        non_tensor_batch.update(extra_fields)
+        non_tensor_batch.update(extra_fields) # J：更新 non_tensor_batch 字典
 
         # Only include reward_extra_keys in meta_info if rm_scores is in batch
         # This avoids conflicts when reward_tensor is merged later in ray_trainer.py
         if "rm_scores" in batch.keys():
-            meta_info = {"metrics": metrics, "reward_extra_keys": reward_extra_keys}
+            meta_info = {"metrics": metrics, "reward_extra_keys": reward_extra_keys} # J：如果 batch 中包含 rm_scores，需要将 reward_extra_keys 也包含在 meta_info 中
         else:
             meta_info = {"metrics": metrics}
 
-        return DataProto(
+        return DataProto( # J：返回 DataProto 对象
             batch=batch,
             non_tensor_batch=non_tensor_batch,
             meta_info=meta_info,
         )
 
 
-async def get_trajectory_info(step, index, validate):
+async def get_trajectory_info(step, index, validate): # J：返回一个与 batch 等长的 list，每个元素是一个 dict：{"step": step, "sample_index": index[i], "rollout_n": rollout_n, "validate": validate}
     """Get trajectory info.
 
     Args:
@@ -1032,13 +1036,13 @@ async def get_trajectory_info(step, index, validate):
     """
     trajectory_info = []
     rollout_n = 0
-    for i in range(len(index)):
-        if i > 0 and index[i - 1] == index[i]:
-            rollout_n += 1
+    for i in range(len(index)): # J：遍历 batch 中的每个样本
+        if i > 0 and index[i - 1] == index[i]: # J：如果当前样本的索引与前一个样本的索引相同，说明当前样本跟前一个样本是同一个 Prompt 的不同 rollout
+            rollout_n += 1 # J：当前样本的 rollout_n 等于前一个样本的 rollout_n 加 1，这里在累计当前 Prompt 的 rollout 数
         else:
-            rollout_n = 0
+            rollout_n = 0 # J：从新的 Prompt 开始，重置 rollout 数为 0
         trajectory_info.append({"step": step, "sample_index": index[i], "rollout_n": rollout_n, "validate": validate})
-    return trajectory_info
+    return trajectory_info # J：list of dict:{"step": step, "sample_index": index[i], "rollout_n": rollout_n, "validate": validate}
 
 
 class AgentLoopManager: # J：默认用于管理 AgentLoop 工作进程的类
@@ -1066,31 +1070,31 @@ class AgentLoopManager: # J：默认用于管理 AgentLoop 工作进程的类
         self.reward_loop_worker_handles = reward_loop_worker_handles
 
         if not hasattr(self, "agent_loop_workers_class"):
-            self.agent_loop_workers_class = ray.remote(AgentLoopWorker)
+            self.agent_loop_workers_class = ray.remote(AgentLoopWorker) # J：注册 AgentLoopWorker 类为远程函数
 
     @classmethod
     @auto_await
     async def create(cls, *args, **kwargs):
         """Create agent loop manager."""
-        instance = cls(*args, **kwargs)
-        await instance._init_agent_loop_workers()
-        return instance
+        instance = cls(*args, **kwargs) # J：创建 AgentLoopManager 实例
+        await instance._init_agent_loop_workers() # J：初始化 AgentLoopWorker 实例
+        return instance # J：返回 AgentLoopManager 实例
 
     async def _init_agent_loop_workers(self):
         self.agent_loop_workers = []
-        num_workers = self.rollout_config.agent.num_workers
+        num_workers = self.rollout_config.agent.num_workers # J：获取配置中的 AgentLoopWorker 数量
 
         node_ids = [node["NodeID"] for node in ray.nodes() if node["Alive"] and node["Resources"].get("CPU", 0) > 0]
-        for i in range(num_workers):
+        for i in range(num_workers): # J：初始化 num_workers 个 AgentLoopWorker 实例
             # Round-robin scheduling over the all nodes
             node_id = node_ids[i % len(node_ids)]
             self.agent_loop_workers.append(
-                self.agent_loop_workers_class.options(
-                    name=f"agent_loop_worker_{i}" + f"_{uuid4().hex[:8]}",
+                self.agent_loop_workers_class.options( # J：初始化 AgentLoopWorker 实例
+                    name=f"agent_loop_worker_{i}" + f"_{uuid4().hex[:8]}", # J：随机生成后缀作为名称
                     scheduling_strategy=ray.util.scheduling_strategies.NodeAffinitySchedulingStrategy(
                         node_id=node_id, soft=True
                     ),
-                ).remote(
+                ).remote( # J：远程初始化 AgentLoopWorker 实例的 __init__ 函数
                     self.config,
                     self.llm_client,
                     self.teacher_client,
@@ -1099,7 +1103,7 @@ class AgentLoopManager: # J：默认用于管理 AgentLoop 工作进程的类
             )
 
     @auto_await
-    async def generate_sequences(self, prompts: DataProto) -> DataProto:
+    async def generate_sequences(self, prompts: DataProto) -> DataProto: # J：AgentLoopManager 的 generate_sequences 函数，供外部训练流程调用，用于生成序列
         """Split input batch and dispatch to agent loop workers.
 
         Args:
@@ -1108,10 +1112,10 @@ class AgentLoopManager: # J：默认用于管理 AgentLoop 工作进程的类
         Returns:
             DataProto: Output batch.
         """
-        chunkes = prompts.chunk(len(self.agent_loop_workers))
+        chunkes = prompts.chunk(len(self.agent_loop_workers)) # J：将输入的 prompts 划分成 num_workers 个 chunk
         outputs = await asyncio.gather(
             *[
-                worker.generate_sequences.remote(chunk)
+                worker.generate_sequences.remote(chunk) # J：并行调用 AgentLoopWorker 的 generate_sequences 函数
                 for worker, chunk in zip(self.agent_loop_workers, chunkes, strict=True)
             ]
         )
@@ -1119,12 +1123,13 @@ class AgentLoopManager: # J：默认用于管理 AgentLoop 工作进程的类
 
         # calculate performance metrics
         metrics = [output.meta_info.pop("metrics") for output in outputs]  # List[List[Dict[str, str]]]
-        timing = self._performance_metrics(metrics, output)
+        timing = self._performance_metrics(metrics, output) # J：计算性能指标
 
-        output.meta_info = {"timing": timing, **outputs[0].meta_info}
+        # J：每个 output 都包含一个 meta_info 字典，用于存储额外的信息，如性能指标等，他们的值都是相等的？
+        output.meta_info = {"timing": timing, **outputs[0].meta_info} # J：将性能指标添加到输出的 meta_info 中，**outputs[0].meta_info 等价 **((outputs[0]).meta_info)
         return output
 
-    def _performance_metrics(self, metrics: list[list[dict[str, str]]], output: DataProto) -> dict[str, float]:
+    def _performance_metrics(self, metrics: list[list[dict[str, str]]], output: DataProto) -> dict[str, float]: # J: 计算性能指标
         timing = {}
         t_generate_sequences = np.array([metric["generate_sequences"] for chunk in metrics for metric in chunk])
         t_tool_calls = np.array([metric["tool_calls"] for chunk in metrics for metric in chunk])

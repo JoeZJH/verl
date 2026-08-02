@@ -320,14 +320,14 @@ class RewardLoopManager:
                 ).remote(self.config, self.reward_router_address)
             )
 
-    def compute_rm_score(self, data: DataProto) -> DataProto: # J：计算 reward score 并返回包含 rm_scores 张量和 reward_extra_info 字段的 DataProto 对象
+    def compute_rm_score(self, data: DataProto) -> DataProto: # J：计算 reward score 并返回包含 rm_scores 张量和 reward_extra_info 字段的 DataProto 对象，注：仅每个样本的最后一个 Response token 被赋值，其余 Token 都是 0
         if self.reward_model_manager is not None:
             self.reward_model_manager.wake_up()
 
         chunks = data.chunk(len(self.reward_loop_workers)) # J：将数据分 num_workers 块
         outputs = ray.get(
             [
-                worker.compute_score_batch.remote(chunk) # J：每个 reward loop worker 都计算一个 chunk 的 reward score
+                worker.compute_score_batch.remote(chunk) # J：每个 reward loop worker 负责计算一个 chunk 的 reward score，并发完成计算
                 for worker, chunk in zip(self.reward_loop_workers, chunks, strict=True)
             ]
         )

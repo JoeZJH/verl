@@ -157,11 +157,11 @@ def load_reward_manager(config: DictConfig, tokenizer: Any, **reward_kwargs: Any
     )
 
 
-def extract_reward(batch: DataProto):
+def extract_reward(batch: DataProto): # J：从 batch 中提取 reward_tensor 和 reward_extra_infos_dict 字段
     """
     Extract reward tensor and extra info from batch data.
     """
-    reward_tensor = batch.batch["rm_scores"]
-    reward_extra_keys = batch.meta_info.get("reward_extra_keys", [])
-    reward_extra_infos_dict = {key: batch.non_tensor_batch[key] for key in reward_extra_keys}
+    reward_tensor = batch.batch["rm_scores"] # J：从 batch 中提取 rm_scores 张量
+    reward_extra_keys = batch.meta_info.get("reward_extra_keys", []) # J：从 batch.meta_info 中提取 reward_extra_keys 字段
+    reward_extra_infos_dict = {key: batch.non_tensor_batch[key] for key in reward_extra_keys} # J：从 batch.non_tensor_batch 中提取 reward_extra_keys 字段对应的非张量数据
     return reward_tensor, reward_extra_infos_dict

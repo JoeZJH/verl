@@ -461,7 +461,7 @@ class RLHFDataset(Dataset): # J：默认使用的 RLHF 数据集类
         return audios or None
 
     @classmethod
-    def _process_multi_modal_info(
+    def _process_multi_modal_info( # J：处理 multimodal 输入，提取图像，视频，音频信息（调用了 process_vision_info 方法）
         cls,
         messages: list[dict],
         image_patch_size,
@@ -483,16 +483,16 @@ class RLHFDataset(Dataset): # J：默认使用的 RLHF 数据集类
         else:
             images, videos = None, None
         audios = cls._extract_audio_info(messages) # J：从消息列表提取音频
-        return images, videos, audios
+        return images, videos, audios # J：返回图像，视频，音频信息
 
     @classmethod
-    async def process_multi_modal_info(
+    async def process_multi_modal_info( # J：处理 multimodal 输入，提取图像，视频，音频信息
         cls,
         messages: list[dict],
         image_patch_size,
         config: DictConfig,
     ) -> tuple[list[Image.Image], list[Any], list[Any]]:
-        return cls._process_multi_modal_info(messages, image_patch_size=image_patch_size, config=config)
+        return cls._process_multi_modal_info(messages, image_patch_size=image_patch_size, config=config) # J：返回图像，视频，音频信息
 
     def split(self, num_splits: int):
         """

@@ -60,7 +60,7 @@ def calculate_log_prob_diff(log_probs1: torch.Tensor, log_probs2: torch.Tensor, 
     return torch.masked_select(full_diff, mask)
 
 
-def calculate_debug_metrics(data: DataProto) -> dict:
+def calculate_debug_metrics(data: DataProto) -> dict: # J：计算 rollout vs actor logprobs 相关指标，用于调试（这个 diff 不能太大）
     """
     calculate rollout vs actor logprobs diff, for debugging purpose
 

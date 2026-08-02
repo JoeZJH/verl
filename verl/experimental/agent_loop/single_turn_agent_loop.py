@@ -25,8 +25,8 @@ logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
-@register("single_turn_agent")
-class SingleTurnAgentLoop(AgentLoopBase):
+@register("single_turn_agent") # J：注册为 single_turn_agent，用于在配置文件指定 agent_loop 时使用，这个 Agent 也是默认的 agent_loop
+class SingleTurnAgentLoop(AgentLoopBase): # J：单轮对话 Agent，仅支持单轮对话，不支持多轮对话
     """Naive agent loop that only do single turn chat completion."""
 
     def __init__(self, *args, **kwargs):
@@ -46,7 +46,7 @@ class SingleTurnAgentLoop(AgentLoopBase):
         mm_processor_kwargs = self._get_mm_processor_kwargs(audios)
 
         # 2. apply chat template and tokenize
-        prompt_ids = await self.apply_chat_template(
+        prompt_ids = await self.apply_chat_template( # J：应用 chat template 并将消息转换为 token_ids
             messages,
             images=images,
             videos=videos,
@@ -56,8 +56,8 @@ class SingleTurnAgentLoop(AgentLoopBase):
 
         # 3. generate sequences
         metrics = {}
-        with simple_timer("generate_sequences", metrics):
-            output: TokenOutput = await self.server_manager.generate(
+        with simple_timer("generate_sequences", metrics): # J：记录生成单轮对话序列的时间消耗，回填到 metrics 中
+            output: TokenOutput = await self.server_manager.generate( # J：生成单轮对话序列，返回 TokenOutput 对象
                 request_id=uuid4().hex,
                 prompt_ids=prompt_ids,
                 sampling_params=sampling_params,
@@ -70,7 +70,7 @@ class SingleTurnAgentLoop(AgentLoopBase):
             metrics["num_preempted"] = output.num_preempted if output.num_preempted is not None else -1
         response_mask = [1] * len(output.token_ids)
 
-        output: AgentLoopOutput = AgentLoopOutput(
+        output: AgentLoopOutput = AgentLoopOutput( # J：将 TokenOutput 对象转换为 AgentLoopOutput 对象
             prompt_ids=prompt_ids,
             response_ids=output.token_ids[: self.response_length],
             response_mask=response_mask[: self.response_length],
@@ -88,6 +88,6 @@ class SingleTurnAgentLoop(AgentLoopBase):
         )
 
         # keeping the schema consistent with tool_agent_loop
-        output.extra_fields.update({"turn_scores": [], "tool_rewards": []})
+        output.extra_fields.update({"turn_scores": [], "tool_rewards": []}) # J：单轮对话，turn_scores 和 tool_rewards 都为空，类似 tool_agent_loop 中的 extra_fields
 
         return output
