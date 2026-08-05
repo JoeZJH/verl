@@ -55,7 +55,8 @@ def enable_full_determinism(seed: int):
         torch.npu.manual_seed_all(seed)
 
 
-def prepare_micro_batches(
+def prepare_micro_batches( # J: use_dynamic_bsz 在这里用于动态平衡 batch size（按照总 Token 数来平衡），避免内存溢出
+    # J：注，use_dynamic_bsz 只影响如何将 mini-batch 拆分为 micro-batch，不影响 train_batch_size 拆分为 mini-batch 的方式
     data: TensorDict,
     dp_group=None,
     num_batches_divided_by=None,

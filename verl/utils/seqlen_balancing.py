@@ -345,7 +345,7 @@ def roundup_divisible(a: int, b: int) -> int:
     return ((a + b - 1) // b) * b
 
 
-def rearrange_micro_batches(
+def rearrange_micro_batches( # J：结合 use_dynamic_bsz_balance 来动态平衡 batch size，避免内存溢出
     batch,
     max_token_len,
     dp_group=None,
@@ -379,7 +379,7 @@ def rearrange_micro_batches(
         max_seq_len = max(seq_len_effective)
     else:
         max_seq_len = batch["attention_mask"].shape[-1]
-        seq_len_effective: torch.Tensor = batch["attention_mask"].sum(dim=1)
+        seq_len_effective: torch.Tensor = batch["attention_mask"].sum(dim=1)  # J：注意是 attention_mask，所以是 unpadding 后的总 Token（包含 Prompt 和 Response） 而不是 Response Token
 
     assert max_token_len >= max_seq_len, (
         f"max_token_len must be greater than the sequence length. Got {max_token_len=} and {max_seq_len=}"
