@@ -230,7 +230,7 @@ class TrainingWorker(Worker, DistProfilerExtension): # J: Critic 工作进程
         return final_output
 
     @register(dispatch_mode=make_nd_compute_dataproto_dispatch_fn(mesh_name="train"), blocking=False)
-    def train_mini_batch(self, data: TensorDict) -> TensorDict:
+    def train_mini_batch(self, data: TensorDict) -> TensorDict: # J：训练一个 batch，拆分为多个 mini-batch，对应 PPO 中一次 Rollout 多次 Update（具体 off-policy 多少步与 mini_batch_size 和 epochs 等有关）
         """Split a batch into N mini-batches run for multiple epochs
 
         Args:
@@ -244,7 +244,7 @@ class TrainingWorker(Worker, DistProfilerExtension): # J: Critic 工作进程
         disable_auto_offload = tu.pop(data, key="disable_auto_offload", default=False)
         mini_batch_size = tu.pop(data, key="mini_batch_size", default=None)
         num_mini_batch = tu.pop(data, key="num_mini_batch", default=None)
-        epochs = tu.pop(data, key="epochs", default=1)
+        epochs = tu.pop(data, key="epochs", default=1) # J: 每个 mini_batch 大小训练 epochs 次
         seed = tu.pop(data, key="seed", default=42)
         dataloader_kwargs = tu.pop(data, key="dataloader_kwargs", default={})
 
@@ -257,13 +257,13 @@ class TrainingWorker(Worker, DistProfilerExtension): # J: Critic 工作进程
             assert mini_batch_size % self.engine.get_data_parallel_size() == 0, (
                 f"Got {mini_batch_size=} and {self.engine.get_data_parallel_size()=}"
             )
-            mini_batch_size_per_gpu = mini_batch_size // self.engine.get_data_parallel_size()
+            mini_batch_size_per_gpu = mini_batch_size // self.engine.get_data_parallel_size() # J: mini_batch_size_per_gpu 等于配置的 mini_batch_size 除以 dp_size
 
         # make iterator
         dataloader = tu.make_iterator(
-            data,
-            mini_batch_size=mini_batch_size_per_gpu,
-            epochs=epochs,
+            data, # J: 输入的 batch，每个 rank 都有一份（不是全局的），后续每次更新 backward 时，会 all-reduce 所有梯度
+            mini_batch_size=mini_batch_size_per_gpu, # J: 这里为什么传入 mini_batch_size_per_gpu 而不是 mini_batch_size，因为 此时的 data 已经是每个 rank 拿到的那一份了
+            epochs=epochs, # J: 每个 mini_batch 大小训练 epochs 次
             seed=seed + self.engine.get_data_parallel_rank(),
             dataloader_kwargs=dataloader_kwargs,
         )
@@ -276,7 +276,7 @@ class TrainingWorker(Worker, DistProfilerExtension): # J: Critic 工作进程
             output_lst = []
             total_num_iterations = data.shape[0] // mini_batch_size_per_gpu * epochs
 
-            for batch_idx, mini_batch_td in enumerate(dataloader):
+            for batch_idx, mini_batch_td in enumerate(dataloader): # J：按照 mini_batch 大小更新参数，可能一次 Rollout 会对应多个 Actor Update
                 # add global token num
                 if "input_ids" in mini_batch_td:
                     global_token_num = mini_batch_td["input_ids"].offsets().diff().tolist()  # (total_nnz,)
@@ -291,13 +291,13 @@ class TrainingWorker(Worker, DistProfilerExtension): # J: Critic 工作进程
                 else:
                     global_token_num = None
 
-                tu.assign_non_tensor(
+                tu.assign_non_tensor( # J: 给 mini_batch_td 赋值一些新的列
                     mini_batch_td,
-                    global_token_num=NonTensorData(global_token_num),
-                    update_lr_scheduler=batch_idx == total_num_iterations - 1,
+                    global_token_num=NonTensorData(global_token_num), # J：全局 Token 数量，后续统计需要使用
+                    update_lr_scheduler=batch_idx == total_num_iterations - 1, # J: 如果是最后一个 batch, 则更新 lr scheduler（问题：lr 的调度可能是周期性的，也可能是常数）
                     disable_auto_offload=True,
                 )
-                actor_output = self.train_batch(mini_batch_td)
+                actor_output = self.train_batch(mini_batch_td) # J：核心函数，一次训练更新，这里面会完成 all-reduce（FSDP 实际是 reduce-scatter），实现 dp 并行的梯度同步
                 output_lst.append(actor_output)
 
             if self.engine.is_mp_src_rank_with_outputs():
@@ -321,7 +321,7 @@ class TrainingWorker(Worker, DistProfilerExtension): # J: Critic 工作进程
 
     @register(dispatch_mode=make_nd_compute_dataproto_dispatch_fn(mesh_name="train"), blocking=False)
     @DistProfiler.annotate(color="red", role="train_batch")
-    def train_batch(self, data: TensorDict) -> TensorDict:
+    def train_batch(self, data: TensorDict) -> TensorDict: # J：核心函数，执行一次更新
         assert self.loss_fn is not None, "loss function can't be None when calling train_batch"
         assert not self.engine_config.forward_only, "Can't run `train_batch` when forward_only is in the engine config."
         # global_token_num should be a list of number of tokens of each seq in this batch
@@ -344,9 +344,9 @@ class TrainingWorker(Worker, DistProfilerExtension): # J: Critic 工作进程
 
         with (
             self.engine.train_mode(disable_auto_offload=disable_auto_offload),
-            Timer(name="train_batch", logger=None) as timer,
+            Timer(name="train_batch", logger=None) as timer, # J: 记录 训练 时间为 train_batch 到 logger 中
         ):
-            output = self.engine.train_batch(data, loss_function=self.loss_fn)
+            output = self.engine.train_batch(data, loss_function=self.loss_fn) # J：执行一次更新，返回的 output 包含训练指标等（如 grad_norm）
             # containing loss, model_output and metrics
             # for training, we only care about loss and metrics
         delta_time = timer.last
@@ -376,7 +376,7 @@ class TrainingWorker(Worker, DistProfilerExtension): # J: Critic 工作进程
         return final_output
 
     @register(dispatch_mode=make_nd_compute_dataproto_dispatch_fn(mesh_name="train"), blocking=False)
-    def infer_batch(self, data: TensorDict) -> TensorDict:
+    def infer_batch(self, data: TensorDict) -> TensorDict: # J：依次前向推理，根据 data 的数据来完成对应的推理动作
         # add mfu calculator
         global_token_num = tu.get(data, key="global_token_num")
         compute_loss = tu.get(data, key="compute_loss", default=True)
@@ -400,12 +400,12 @@ class TrainingWorker(Worker, DistProfilerExtension): # J: Critic 工作进程
         loss_function = self.loss_fn if compute_loss else None
 
         with (
-            self.engine.eval_mode(disable_auto_offload=disable_auto_offload),
+            self.engine.eval_mode(disable_auto_offload=disable_auto_offload), # J：这里是一个 Ctx 类
             Timer(name="eval_batch", logger=None) as timer,
         ):
             adapter_ctx = self.engine.disable_adapter() if no_lora_adapter else nullcontext()
             with adapter_ctx:
-                output = self.engine.infer_batch(data, loss_function=loss_function)
+                output = self.engine.infer_batch(data, loss_function=loss_function) # J：完成一次前向推理
         delta_time = timer.last
 
         if self.engine.is_mp_src_rank_with_outputs():
@@ -487,7 +487,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension): # J: Actor 工作进
         )
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
-    def set_loss_fn(self, loss_fn):
+    def set_loss_fn(self, loss_fn): # J：设置 loss_function 用于计算 loss
         self.actor.set_loss_fn(loss_fn=loss_fn)
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
@@ -496,7 +496,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension): # J: Actor 工作进
         self.actor.to(device=device, model=model, optimizer=optimizer, grad=grad)
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
-    def init_model(self):
+    def init_model(self): # J：初始化 ActorRolloutRefWorker，包括绑定对应的 loss_fn 等
         model_config: HFModelConfig = omega_conf_to_dataclass(self.config.model)
 
         # 1. build reference model
@@ -534,7 +534,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension): # J: Actor 工作进
             ref_training_config.engine_config.use_remove_padding = model_config.get("use_remove_padding", False)
 
             self.ref = TrainingWorker(config=ref_training_config)
-            self.ref.reset()
+            self.ref.reset() # J：重置到初始状态
             self.set_dispatch_collect(mesh_name="ref", **self.ref.get_dispatch_collect())
 
         # 2. build actor model
@@ -576,14 +576,14 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension): # J: Actor 工作进
                 assert self.config.rollout.log_prob_micro_batch_size_per_gpu is not None
                 assert self.config.actor.ppo_micro_batch_size_per_gpu is not None
             if self.distillation_enabled:
-                self.loss_fn = partial(
+                self.loss_fn = partial( # J：如果是 蒸馏，则使用 蒸馏的 Loss
                     distillation_ppo_loss, config=actor_config, distillation_config=distillation_config
                 )
             else:
-                self.loss_fn = partial(ppo_loss, config=actor_config)
+                self.loss_fn = partial(ppo_loss, config=actor_config) # J：将 ppo_loss 赋值给 loss_fn，后续直接调用即可更新 Actor
             self.actor = TrainingWorker(config=actor_training_config)
-            self.actor.reset()
-            self.actor.set_loss_fn(self.loss_fn)
+            self.actor.reset() # J：重置到初始状态
+            self.actor.set_loss_fn(self.loss_fn) # J：为 Actor 设置 loss_fn
             self.set_dispatch_collect(mesh_name="actor", **self.actor.get_dispatch_collect())
 
         # 3. build rollout engine
@@ -641,7 +641,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension): # J: Actor 工作进
     @DistProfiler.annotate(color="blue", role="actor_compute_log_prob")
     @_with_routing_replay_flag(enabled=True)
     def compute_log_prob(self, data: TensorDict) -> TensorDict:
-        output = self.actor.infer_batch(data)
+        output = self.actor.infer_batch(data) # J: 完成一个 batch 的前向推理
 
         return output.cpu() if output is not None else None
 

@@ -32,6 +32,7 @@ RawRewardFn = Callable[..., Any] | None
 
 
 class RewardManagerBase(ABC):
+    # J：关系：RewardLoopManager 持有多个 RewardLoopWorker（Ray Worker），RewardLoopWorker 包含一个 RewardManager, RewardManager 负责真实的 reward 计算过程
     _class_initialized = False
 
     def __init__(self, config: DictConfig, tokenizer: AutoTokenizer, compute_score: RawRewardFn):

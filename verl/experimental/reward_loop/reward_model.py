@@ -47,7 +47,7 @@ class RewardModelManager: # J：RewardModelManager 是 reward model 的管理类
         if self.config.rollout.free_cache_engine:
             self.sleep()
 
-    def _initialize_llm_servers(self):
+    def _initialize_llm_servers(self): # J：初始化 reward model 的 replica
         rollout_config = self.config.rollout
         rollout_world_size = ( # J：rollout_world_size 是 rollout 角色的 world_size，即 rollout 角色的 GPU 数量的乘积
             rollout_config.tensor_model_parallel_size
@@ -69,29 +69,29 @@ class RewardModelManager: # J：RewardModelManager 是 reward model 的管理类
         rollout_replica_class = get_rollout_replica_class(rollout_config.name)
         model_config = HFModelConfig(path=self.config.model_path) # J：model_config 是 reward model 的配置，包含模型路径、分层配置等
         self.tokenizer = model_config.get_processor()
-        self.rollout_replicas = [
+        self.rollout_replicas = [ # J：使用 rollout 框架实现 reward model 的并行推理服务
             rollout_replica_class(
                 replica_rank=replica_rank,
                 config=rollout_config,
                 model_config=model_config,
                 gpus_per_node=self.config.n_gpus_per_node,
-                is_reward_model=True,
+                is_reward_model=True, # J：is_reward_model 表示这是 reward model 的 replica，而不是其他模型（Rollout 也会相同类进行推理）的 replica
             )
             for replica_rank in range(num_replicas)
         ]
         if self.resource_pool:
             split_resource_pools = split_resource_pool(self.resource_pool, split_size=rollout_world_size)
             assert len(split_resource_pools) == len(self.rollout_replicas)
-            self._run_all(
+            self._run_all( # J：启动所有任务（提交到协程的 loop event 中），但不等待它们完成，也不返回任何结果
                 [
-                    server.init_colocated(resource_pool)
+                    server.init_colocated(resource_pool) # J：初始化每个 reward model 的 replica，分配资源池
                     for server, resource_pool in zip(self.rollout_replicas, split_resource_pools, strict=True)
                 ]
             )
         else:
             self._run_all([server.init_standalone() for server in self.rollout_replicas])
         self.server_handles = [server._server_handle for server in self.rollout_replicas]
-        self.server_addresses = [server._server_address for server in self.rollout_replicas]
+        self.server_addresses = [server._server_address for server in self.rollout_replicas] # J：server_addresses 是 reward model 的 replica 地址列表，用于其他节点调用
 
     def _initialize_router(self):
         worker_urls = [f"http://{server_address}" for server_address in self.server_addresses]
@@ -117,7 +117,7 @@ class RewardModelManager: # J：RewardModelManager 是 reward model 的管理类
         """Sleep all rollout replica instances."""
         self._run_all([replica.sleep() for replica in self.rollout_replicas])
 
-    def _run_all(self, tasks: list[asyncio.Task]):
+    def _run_all(self, tasks: list[asyncio.Task]): # J：并行运行所有 asyncio.Task，立即启动，但不等待它们完成，也不返回任何结果
         async def run_all():
             await asyncio.gather(*tasks)
 

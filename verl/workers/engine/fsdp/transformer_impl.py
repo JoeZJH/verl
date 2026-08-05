@@ -640,6 +640,7 @@ class FSDPEngine(BaseEngine):
 
         for micro_batch in micro_batches:
             with ctx:
+                # J：forward_step 中如果 micro_batch 上配置了 calculate_entropy，还会顺便计算 entropy
                 loss, meta_info = self.forward_step(micro_batch, loss_function=loss_function, forward_only=forward_only)
 
                 if not forward_only:
@@ -1250,7 +1251,7 @@ class FSDPEngineWithLMHead(FSDPEngine):
 
         return model_output
 
-    def forward_step(self, micro_batch: TensorDict, loss_function, forward_only):
+    def forward_step(self, micro_batch: TensorDict, loss_function, forward_only): # J: micro_batch 若配置了 calculate_entropy 也会顺便计算，
         device_name = get_device_name()
         # actually, we should avoid assigning like this...
         micro_batch = micro_batch.to(get_device_id())
@@ -1267,17 +1268,17 @@ class FSDPEngineWithLMHead(FSDPEngine):
             else torch.autocast(device_type=device_name, dtype=autocast_dtype)
         )
         with autocast_ctx:
-            raw_output = self.module(
+            raw_output = self.module( # J：执行模型推理过程
                 **model_inputs,
                 use_cache=False,
             )  # prevent model thinks we are generating
 
-            model_output = self.prepare_model_outputs(
+            model_output = self.prepare_model_outputs( # J：micro_batch 中配置了 calculate_entropy 时会顺便计算并返回
                 output=raw_output, output_args=output_args, micro_batch=micro_batch, logits_processor_func=loss_function
             )
 
             if loss_function is not None:
-                loss, metrics = loss_function(
+                loss, metrics = loss_function( # J：配置了损失函数时，完成损失函数
                     model_output=model_output, data=micro_batch, dp_group=self.get_data_parallel_group()
                 )
             else:

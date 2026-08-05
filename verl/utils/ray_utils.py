@@ -84,7 +84,7 @@ def parallel_put(data_list: list[Any], max_workers: Optional[int] = None):
     return output
 
 
-def get_event_loop():
+def get_event_loop(): # J：获取当前线程的 event loop
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:

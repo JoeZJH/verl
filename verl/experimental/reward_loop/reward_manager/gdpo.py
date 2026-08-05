@@ -32,7 +32,7 @@ class GDPORewardManager(RewardManagerBase):
         self.reward_router_address = reward_router_address
         self.reward_model_tokenizer = reward_model_tokenizer
 
-    async def run_single(self, data: DataProto) -> dict:
+    async def run_single(self, data: DataProto) -> dict: # J：GDPO 的奖励实现，除了 reward_score 字段外，把需要的字段添加到 non_tensor_batch 中
         data = data[-1:]  # for multi-sequence outputs, we only compute reward based on the last sequence
         data_item = data[0]
         response_ids = data_item.batch["responses"]
@@ -79,14 +79,14 @@ class GDPORewardManager(RewardManagerBase):
         reward_extra_info = {}
 
         score: float
-        if isinstance(result, dict):
-            score = result["score"]
-            for key, value in result.items():
+        if isinstance(result, dict): # J：返回值为 dict 时，抽取 score 字段作为 reward_score
+            score = result["score"] # J：从结果抽取来赋值为 scores
+            for key, value in result.items(): # J：将不同维度的奖励结果添加到 reward_extra_info 中，方便 GDPO 读取多个奖励
                 reward_extra_info[key] = value
-        else:
+        else: # J：返回值不为为 dict 时，result 本身作为 reward_score
             score = result
             reward_extra_info["acc"] = score
 
         reward = score
 
-        return {"reward_score": reward, "reward_extra_info": reward_extra_info}
+        return {"reward_score": reward, "reward_extra_info": reward_extra_info} # J：返回 run_single 的结果

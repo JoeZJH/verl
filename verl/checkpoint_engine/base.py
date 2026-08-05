@@ -275,7 +275,7 @@ class ColocatedCheckpointEngine(CheckpointEngine):
         self.weights = None
 
 
-class CheckpointEngineWorker(Worker):
+class CheckpointEngineWorker(Worker): # J：这个类是 部署在 rollout 侧每个 GPU 上的 Ray Worker Actor ，负责把 trainer 训练出的新权重同步到本地推理引擎（vLLM/SGLang/TRT-LLM）里
     """CheckpointEngineWorker colocated with inference engine's WorkerProc on same GPU.
 
     Args:

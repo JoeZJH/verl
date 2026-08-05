@@ -47,7 +47,7 @@ async def _call_with_kwargs_async(raw_fn, extra_kwargs, *args, **kwargs):
     return await raw_fn(*args, **merged_kwargs)
 
 
-def get_custom_reward_fn(config: DictConfig) -> Optional[RawRewardFn]:
+def get_custom_reward_fn(config: DictConfig) -> Optional[RawRewardFn]: # J：根据配置读取自定义奖励计算函数
     """Load and return a custom reward function from external file.
 
     Dynamically imports a reward function from a specified file path and wraps
@@ -86,14 +86,14 @@ def get_custom_reward_fn(config: DictConfig) -> Optional[RawRewardFn]:
         return partial(_call_with_kwargs_async, raw_fn, reward_kwargs)
 
 
-def resolve_reward_manager_cls(config: DictConfig) -> type[RewardManagerBase]:
+def resolve_reward_manager_cls(config: DictConfig) -> type[RewardManagerBase]: # J：根据配置文件解析 RewardManager 类
     """Resolve the reward manager class from ``config`` without instantiating it."""
     reward_manager_cfg: RewardManagerConfig = config.reward.reward_manager
-    if reward_manager_cfg.source == "register":
+    if reward_manager_cfg.source == "register": # J：如果奖励管理器来源为 register，则从注册表中获取 RewardManager 类
         from verl.experimental.reward_loop.reward_manager import get_reward_manager_cls
 
-        return get_reward_manager_cls(reward_manager_cfg.name)
-    elif reward_manager_cfg.source == "importlib":
+        return get_reward_manager_cls(reward_manager_cfg.name) # J：根据名称获取 RewardManager 类
+    elif reward_manager_cfg.source == "importlib": # J：如果奖励管理器来源为 importlib，则从指定模块中导入 RewardManager 类
         from verl.utils.import_utils import load_extern_object
 
         module_cfg: ModuleConfig | None = reward_manager_cfg.module
@@ -108,7 +108,8 @@ def resolve_reward_manager_cls(config: DictConfig) -> type[RewardManagerBase]:
         raise ValueError(f"Unknown reward manager source: {reward_manager_cfg.source}")
 
 
-def load_reward_manager(config: DictConfig, tokenizer: Any, **reward_kwargs: Any) -> RewardManagerBase:
+def load_reward_manager(config: DictConfig, tokenizer: Any, **reward_kwargs: Any) -> RewardManagerBase: # J: 加载 RewardManager 的核心类
+    # J：关系：RewardLoopManager 持有多个 RewardLoopWorker（Ray Worker），RewardLoopWorker 包含一个 RewardManager, RewardManager 负责真实的 reward 计算过程
     """
     Load and initialize a reward manager based on the configuration.
 
@@ -123,36 +124,37 @@ def load_reward_manager(config: DictConfig, tokenizer: Any, **reward_kwargs: Any
 
     # Try to get a custom reward function based on the configuration
     # user defined reward manager can be registered in custom_reward_fn
-    compute_score = get_custom_reward_fn(config)
+    compute_score = get_custom_reward_fn(config) # J：根据配置读取自定义奖励计算函数
     final_compute_score = compute_score
 
-    reward_manager_cfg: RewardManagerConfig = config.reward.reward_manager
-    reward_manager_cls = resolve_reward_manager_cls(config)
+    reward_manager_cfg: RewardManagerConfig = config.reward.reward_manager # J：获取 RewardManager 类的配置类
+    reward_manager_cls = resolve_reward_manager_cls(config) # J：根据配置文件解析 RewardManager 类
 
-    default_compute_score_ = get_default_compute_score(reward_manager_cfg.name)
+    default_compute_score_ = get_default_compute_score(reward_manager_cfg.name) # J：返回默认的 Reward 计算函数
 
-    if compute_score is None:
+    if compute_score is None: # J：如果没有 compute_socre 函数，再考虑使用默认的 default_compute_score_ 函数
         sandbox_config = config.reward.get("sandbox_fusion")
         sandbox_url = sandbox_config.get("url") if sandbox_config else None
         memory_limit_mb = sandbox_config.get("memory_limit_mb", 1024) if sandbox_config else 1024
         if sandbox_url:
             sandbox_manager = multiprocessing.Manager()
             # Create a semaphore to control concurrent access to the sandbox
+            # J：管理沙盒并发量，这里获取当前允许的最大信号量，默认值为 64
             _concurrent_semaphore = sandbox_manager.Semaphore(sandbox_config.get("max_concurrent", 64))
-            final_compute_score = partial(
+            final_compute_score = partial( # J：经过封装以后再试用 default_compute_score_ 函数
                 default_compute_score_,
                 sandbox_fusion_url=sandbox_url,
                 concurrent_semaphore=_concurrent_semaphore,
                 memory_limit_mb=memory_limit_mb,
             )
         else:
-            final_compute_score = default_compute_score_
+            final_compute_score = default_compute_score_ # J: 直接使用 default_compute_score_ 函数
 
     # Instantiate and return the reward manager with the specified parameters
-    return reward_manager_cls(
+    return reward_manager_cls( # J：根据配置文件解析的 RewardManager 类创建实例
         config=config,
         tokenizer=tokenizer,
-        compute_score=final_compute_score,
+        compute_score=final_compute_score, # J：将最终确定的计算奖励的函数传入到 RewardManager 类中负责奖励计算
         **reward_kwargs,
     )
 

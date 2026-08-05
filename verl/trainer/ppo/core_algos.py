@@ -47,10 +47,10 @@ PolicyLossFn = Callable[
     tuple[torch.Tensor, dict[str, Any]],
 ]
 
-POLICY_LOSS_REGISTRY: dict[str, PolicyLossFn] = {}
+POLICY_LOSS_REGISTRY: dict[str, PolicyLossFn] = {} # J: Policy Loss 函数注册表，目前注册了  'vanilla', 'gspo', 'cispo', 'sapo', 'kl-cov', 'gpg' 等
 
 
-def register_policy_loss(name: str) -> Callable[[PolicyLossFn], PolicyLossFn]:
+def register_policy_loss(name: str) -> Callable[[PolicyLossFn], PolicyLossFn]: # J: 注册 Policy Loss 函数，将函数添加到注册表
     """Register a policy loss function with the given name.
 
     Args:
@@ -61,13 +61,13 @@ def register_policy_loss(name: str) -> Callable[[PolicyLossFn], PolicyLossFn]:
     """
 
     def decorator(func: PolicyLossFn) -> PolicyLossFn:
-        POLICY_LOSS_REGISTRY[name] = func
+        POLICY_LOSS_REGISTRY[name] = func # J: 添加函数到注册表，实现注册 Policy Loss 函数
         return func
 
     return decorator
 
 
-def get_policy_loss_fn(name):
+def get_policy_loss_fn(name): # J: 根据 name 获取 Policy Loss 函数
     """Get the policy loss with a given name.
 
     Args:
@@ -78,11 +78,11 @@ def get_policy_loss_fn(name):
         `(callable)`: The policy loss function.
     """
     loss_name = name
-    if loss_name not in POLICY_LOSS_REGISTRY:
+    if loss_name not in POLICY_LOSS_REGISTRY: # J: 如果注册表中没有该函数，则抛出 ValueError 异常
         raise ValueError(
             f"Unsupported loss mode: {loss_name}. Supported modes are: {list(POLICY_LOSS_REGISTRY.keys())}"
         )
-    return POLICY_LOSS_REGISTRY[loss_name]
+    return POLICY_LOSS_REGISTRY[loss_name] # J: 返回注册表中的函数
 
 
 class AdvantageEstimator(str, Enum):
@@ -110,10 +110,10 @@ class AdvantageEstimator(str, Enum):
     GDPO = "gdpo"
 
 
-ADV_ESTIMATOR_REGISTRY: dict[str, Any] = {}
+ADV_ESTIMATOR_REGISTRY: dict[str, Any] = {} # J: advantage 估计函数注册表，目前注册了  'gae', 'grpo', 'reinforce_plus_plus', 'remax', 'rloo', 'opo', 'grpo_passk', 'gpg', 'rloo_vectorized', 'grpo_vectorized', 'optimal_token_baseline', 'tir_optimal_token_baseline', 'gdpo' 等
 
 
-def register_adv_est(name_or_enum: str | AdvantageEstimator) -> Any:
+def register_adv_est(name_or_enum: str | AdvantageEstimator) -> Any: # J: 注册 advantage 估计函数，将函数添加到注册表
     """Decorator to register a advantage estimator function with a given name.
 
     Args:
@@ -134,7 +134,7 @@ def register_adv_est(name_or_enum: str | AdvantageEstimator) -> Any:
     return decorator
 
 
-def get_adv_estimator_fn(name_or_enum):
+def get_adv_estimator_fn(name_or_enum): # J: 根据 name 获取 advantage 估计函数
     """Get the advantage estimator function with a given name.
 
     Args:
@@ -145,12 +145,12 @@ def get_adv_estimator_fn(name_or_enum):
         `(callable)`: The advantage estimator function.
     """
     name = name_or_enum.value if isinstance(name_or_enum, Enum) else name_or_enum
-    if name not in ADV_ESTIMATOR_REGISTRY:
+    if name not in ADV_ESTIMATOR_REGISTRY: # J: 如果注册表中没有该函数，则抛出 ValueError 异常
         raise ValueError(f"Unknown advantage estimator simply: {name}")
     return ADV_ESTIMATOR_REGISTRY[name]
 
 
-class AdaptiveKLController:
+class AdaptiveKLController: # J：自适应 KL 控制器，用于根据当前 KL 散度和步数，动态调整 KL 系数，以保持 KL 散度在目标值附近
     """
     Adaptive KL controller described in the paper:
     https://arxiv.org/pdf/1909.08593.pdf
@@ -161,7 +161,7 @@ class AdaptiveKLController:
         self.target = target_kl
         self.horizon = horizon
 
-    def update(self, current_kl, n_steps):
+    def update(self, current_kl, n_steps): # J：根据当前 KL 散度和步数，更新 KL 系数，类似 PID 控制器的更新
         """Update the KL coefficient based on current KL divergence.
 
         Args:
@@ -213,7 +213,7 @@ def get_kl_controller(kl_ctrl):
 
 
 @register_adv_est(AdvantageEstimator.GAE)  # or simply: @register_adv_est("gae")
-def compute_gae_advantage_return(
+def compute_gae_advantage_return( # J：计算 GAE 的 Advantage 和 returns
     token_level_rewards: torch.Tensor,
     values: torch.Tensor,
     response_mask: torch.Tensor,
@@ -247,7 +247,7 @@ def compute_gae_advantage_return(
         advantages_reversed = []
         gen_len = token_level_rewards.shape[-1]
 
-        for t in reversed(range(gen_len)):
+        for t in reversed(range(gen_len)): # J：GAE 的 Advantage 叠加公式，先逆向计算
             delta = token_level_rewards[:, t] + gamma * nextvalues - values[:, t]
             lastgaelam_ = delta + gamma * lam * lastgaelam
 
@@ -256,21 +256,22 @@ def compute_gae_advantage_return(
             lastgaelam = lastgaelam_ * response_mask[:, t] + (1 - response_mask[:, t]) * lastgaelam
 
             advantages_reversed.append(lastgaelam)
-        advantages = torch.stack(advantages_reversed[::-1], dim=1)
+        advantages = torch.stack(advantages_reversed[::-1], dim=1) # J：计算结束后再一次求逆向得到最终结果
 
         returns = advantages + values
         advantages = verl_F.masked_whiten(advantages, response_mask)
-    return advantages, returns
+    return advantages, returns # J：返回 Advantage 和 returns
 
 
 # NOTE(sgm): this implementation only consider outcome supervision, where the reward is a scalar.
 @register_adv_est(AdvantageEstimator.GRPO)  # or simply: @register_adv_est("grpo")
-def compute_grpo_outcome_advantage(
+def compute_grpo_outcome_advantage( # J：计算 GRPO 估计 的 advantage，包括 Dr.GRPO 模式等也通过 norm_adv_by_std_in_grpo 来选择是否除以 std
+    # J: 注：菏泽个函数中 outcome 的意思主要是在描述 outcome reward 这个事实
     token_level_rewards: torch.Tensor,
     response_mask: torch.Tensor,
     index: np.ndarray,
     epsilon: float = 1e-6,
-    norm_adv_by_std_in_grpo: bool = True,
+    norm_adv_by_std_in_grpo: bool = True, # J：GRPO advantage 计算时是否除以 std
     config: Optional[AlgoConfig] = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
@@ -301,15 +302,15 @@ def compute_grpo_outcome_advantage(
         Returns: `(torch.Tensor)`
             shape is (bs, response_length)
     """
-    scores = token_level_rewards.sum(dim=-1)
+    scores = token_level_rewards.sum(dim=-1) # J：这里得到的是 sequence 粒度的 reward（# (bs, response_length) -> (bs,)  序列级标量奖励）
 
     id2score = defaultdict(list)
     id2mean = {}
     id2std = {}
 
-    with torch.no_grad():
+    with torch.no_grad(): # J：计算 advantage 时，不需要梯度
         bsz = scores.shape[0]
-        for i in range(bsz):
+        for i in range(bsz): # J：同一组 Prompt 的 index 是相同的，一般是 uid
             id2score[index[i]].append(scores[i])
         for idx in id2score:
             if len(id2score[idx]) == 1:
@@ -326,13 +327,14 @@ def compute_grpo_outcome_advantage(
                 scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + epsilon)
             else:
                 scores[i] = scores[i] - id2mean[index[i]]
-        scores = scores.unsqueeze(-1) * response_mask
+        scores = scores.unsqueeze(-1) * response_mask # J: # (bs, 1) * (bs, response_length) -> (bs, response_length)
 
-    return scores, scores
+    # J：问题：为什么是一样的？因为 GRPO 不需要更新 Critic，所以设置为 returns =: advantages，如果在 GAE 中，则不能这样
+    # J: 补充：GAE 中，returns =: advantages + values，用于 Critic 模型更新
+    return scores, scores # J：返回两个相同的值，分别作为 advantages 和 returns
 
-
-@register_adv_est(AdvantageEstimator.GRPO_VECTORIZED)
-def compute_grpo_vectorized_outcome_advantage(
+@register_adv_est(AdvantageEstimator.GRPO_VECTORIZED) # J：GRPO 的 vectorized 版本，与 compute_grpo_outcome_advantage 在数学上值相同（在超大 Batch 上，GPU 并行化，性能更好，但内存占用更多（是 float32 类型））
+def compute_grpo_vectorized_outcome_advantage( # J：compute_grpo_outcome_advantage 的 vectorized 版本
     token_level_rewards: torch.Tensor,
     response_mask: torch.Tensor,
     index: np.ndarray,
@@ -346,7 +348,7 @@ def compute_grpo_vectorized_outcome_advantage(
       a_i = \\frac{r_i - \\mu_g}{\\sigma_g} (or without dividing by \\sigma_g),
       then broadcast the scalar across the token dimension (multiplied by response_mask).。
     """
-    with torch.no_grad():
+    with torch.no_grad(): # J：计算 advantage 时，不需要梯度
         scores = token_level_rewards.sum(dim=-1)
         g = as_torch_index(index, device=scores.device)
         mean_g, std_g, _ = group_mean_std(scores, g, eps=0.0, device=scores.device)
@@ -358,8 +360,8 @@ def compute_grpo_vectorized_outcome_advantage(
         return advantages, advantages
 
 
-@register_adv_est(AdvantageEstimator.GDPO)  # or simply: @register_adv_est("gdpo")
-def compute_gdpo_outcome_advantage(
+@register_adv_est(AdvantageEstimator.GDPO)  # or simply: @register_adv_est("gdpo") # J：GDPO 估计 模式
+def compute_gdpo_outcome_advantage( # J：GDPO 估计 模式
     token_level_rewards: torch.Tensor,
     response_mask: torch.Tensor,
     index: np.ndarray,
@@ -432,9 +434,9 @@ def compute_gdpo_outcome_advantage(
             rm_scores[torch.arange(rm_scores.size(0), device=device), valid_response_length] = rm_score
             score_list.append(rm_scores)
 
-        gdpo_weights = config.get("gdpo_reward_weights", None)
+        gdpo_weights = config.get("gdpo_reward_weights", None) # J：获取 GDPO 权重，这里可以配置每个不同维度奖励的权重
         if gdpo_weights is not None:
-            reward_weights = list(gdpo_weights)
+            reward_weights = list(gdpo_weights) # J：将 GDPO 权重转换为列表，方便后续计算
 
     if score_list is None:
         score_list = [token_level_rewards]
@@ -442,14 +444,16 @@ def compute_gdpo_outcome_advantage(
     num_scores = len(score_list)
 
     if reward_weights is not None:
+        # J：如果提供了权重（"config.gdpo_reward_weights"），就用提供的权重
         weights = torch.tensor(reward_weights, dtype=torch.float32, device=token_level_rewards.device)
     else:
+        # J：如果没有提供权重，就用等权重
         weights = torch.ones(num_scores, dtype=torch.float32, device=token_level_rewards.device)
 
     new_advantage = None
 
     for i in range(num_scores):
-        normalized_score, _ = compute_grpo_outcome_advantage(
+        normalized_score, _ = compute_grpo_outcome_advantage( # J：对每个维度的 scores 单独进行一次 GRPO 估计
             token_level_rewards=score_list[i],
             response_mask=response_mask,
             index=index,
@@ -458,6 +462,7 @@ def compute_gdpo_outcome_advantage(
             config=config,
         )
 
+        # J：对每个维度的 scores 单独进行一次 GRPO 估计，然后用权重加权
         if new_advantage is None:
             new_advantage = weights[i] * normalized_score
         else:
@@ -1276,11 +1281,11 @@ def compute_policy_loss(
     return pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower
 
 
-@register_policy_loss("vanilla")  # type: ignore[arg-type]
-def compute_policy_loss_vanilla(
+@register_policy_loss("vanilla")  # type: ignore[arg-type] # J: vanilla 实现
+def compute_policy_loss_vanilla( # J：默认的 Actor Loss 定义，包含传统 PPO Clip + clip_ratio_c + rollout_is_weight + loss_agg_mode 等功能
     old_log_prob: torch.Tensor,
     log_prob: torch.Tensor,
-    advantages: torch.Tensor,
+    advantages: torch.Tensor, # J：注意：到这里 Advantage 已经计算完成了
     response_mask: torch.Tensor,
     loss_agg_mode: str = "token-mean",
     config: Optional[ActorConfig] = None,
@@ -1331,43 +1336,43 @@ def compute_policy_loss_vanilla(
     # Clamp negative_approx_kl for stability
     negative_approx_kl = torch.clamp(negative_approx_kl, min=-20.0, max=20.0)
     ratio = torch.exp(negative_approx_kl)
-    ppo_kl = verl_F.masked_mean(-negative_approx_kl, response_mask)
+    ppo_kl = verl_F.masked_mean(-negative_approx_kl, response_mask) # J：k1 估计，针对 clip 后的 -negative_approx_kl 求 Token-level 的均值（所有 Token 一起平均）
 
-    pg_losses1 = -advantages * ratio
+    pg_losses1 = -advantages * ratio # J：原始目标
     if cliprange_low is None:
         cliprange_low = cliprange
     if cliprange_high is None:
         cliprange_high = cliprange
-    pg_losses2 = -advantages * torch.clamp(
+    pg_losses2 = -advantages * torch.clamp( # J：带 PPO Ratio Clip 的目标
         ratio, 1 - cliprange_low, 1 + cliprange_high
     )  # - clip(ratio, 1-cliprange, 1+cliprange) * A
-    clip_pg_losses1 = torch.maximum(
+    clip_pg_losses1 = torch.maximum( # J：两者取最大，因为前面有负号，实际上对应 PPO 的 min 函数
         pg_losses1, pg_losses2
     )  # max(-ratio * A, -clip(ratio, 1-cliprange, 1+cliprange) * A)
-    pg_clipfrac = verl_F.masked_mean(torch.gt(pg_losses2, pg_losses1).float(), response_mask)
+    pg_clipfrac = verl_F.masked_mean(torch.gt(pg_losses2, pg_losses1).float(), response_mask) # J：记录被截断的比例
 
-    pg_losses3 = -advantages * clip_ratio_c
-    clip_pg_losses2 = torch.min(pg_losses3, clip_pg_losses1)
-    pg_clipfrac_lower = verl_F.masked_mean(
+    pg_losses3 = -advantages * clip_ratio_c # J：这里是总体截断上界，核心生效场景是在 Advantage<0 的场景（因为一般 clip_ratio_c 都比 clip_high 大很多，否则 Advantage>0 的场景也会生效），如果 Ratio 太大，PPO Clip 不掉，但可能是一个异常（for 稳定性）
+    clip_pg_losses2 = torch.min(pg_losses3, clip_pg_losses1) # J：两者取最小值，实际上是实现 Advantage 为负时，ratio 太大的 Clip
+    pg_clipfrac_lower = verl_F.masked_mean( # J：记录 advantages < 0 且碰到下界的比例
         torch.gt(clip_pg_losses1, pg_losses3) * (advantages < 0).float(), response_mask
     )
 
-    pg_losses = torch.where(advantages < 0, clip_pg_losses2, clip_pg_losses1)
+    pg_losses = torch.where(advantages < 0, clip_pg_losses2, clip_pg_losses1) # J: 不论 clip_ratio_c 是否比 clip_high 大，都确保仅针对 Advantage<0 执行 clip_ratio_c 生效
 
     # Apply rollout correction weights if provided
     if rollout_is_weights is not None:
-        pg_losses = pg_losses * rollout_is_weights
+        pg_losses = pg_losses * rollout_is_weights # J：乘以 训推不一致的修正权重（rollout_is_weights 是 Rollout 重要性 采样权重，从外面传进来）
 
-    pg_loss = agg_loss(
+    pg_loss = agg_loss( # J：根据 loss_agg_mode 聚合损失
         loss_mat=pg_losses, loss_mask=response_mask, loss_agg_mode=loss_agg_mode, **config.global_batch_info
     )
 
-    pg_metrics = {
-        "actor/pg_clipfrac": pg_clipfrac.detach().item(),
-        "actor/ppo_kl": ppo_kl.detach().item(),
-        "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
+    pg_metrics = { # J: 记录相关的指标
+        "actor/pg_clipfrac": pg_clipfrac.detach().item(), # J：PPO clip 比例
+        "actor/ppo_kl": ppo_kl.detach().item(), # J：所有 Token 取平均
+        "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(), # J：PPO clip_ratio_c 截断比例
     }
-    return pg_loss, pg_metrics
+    return pg_loss, pg_metrics # J：返回 Loss 和指标
 
 
 @register_policy_loss("dppo_tv")
@@ -1537,7 +1542,7 @@ def compute_policy_loss_dppo_kl(
 
 
 @register_policy_loss("gspo")
-def compute_policy_loss_gspo(
+def compute_policy_loss_gspo( # J：GSPO Actor Loss 实现
     old_log_prob: torch.Tensor,
     log_prob: torch.Tensor,
     advantages: torch.Tensor,
@@ -1613,7 +1618,7 @@ def compute_policy_loss_gspo(
 
 
 @register_policy_loss("sapo")
-def compute_policy_loss_sapo(
+def compute_policy_loss_sapo( # J：SAPO 的实现
     old_log_prob: torch.Tensor,
     log_prob: torch.Tensor,
     advantages: torch.Tensor,
@@ -1678,7 +1683,7 @@ def compute_policy_loss_sapo(
         pg_losses = pg_losses * rollout_is_weights
 
     # for SAPO, we need to aggregate the loss at the sequence level (seq-mean-token-mean)
-    pg_loss = agg_loss(
+    pg_loss = agg_loss( # J：SAPO 中强制使用 seq-mean-token-mean
         loss_mat=pg_losses, loss_mask=response_mask, loss_agg_mode="seq-mean-token-mean", **config.global_batch_info
     )
 
@@ -1697,8 +1702,8 @@ def compute_policy_loss_sapo(
     return pg_loss, pg_metrics
 
 
-@register_policy_loss("gpg")
-def compute_policy_loss_gpg(
+@register_policy_loss("gpg") # J：GPG 实现，GPG 是最简单的方法，除了 Advantage 以外几乎等价于 REINFORCE 方法（相对 vanilla 不需要各种 PPO Clip 或 clip_ratio_c 等）
+def compute_policy_loss_gpg( # GPG 实现，跟本文件中后面 REINFORCE 方法（compute_policy_loss_reinforce）完全对齐，compute_policy_loss_reinforce 会被 bypass_mode 方法 loss_type="reinforce" 时调用
     old_log_prob: torch.Tensor,
     log_prob: torch.Tensor,
     advantages: torch.Tensor,
@@ -2082,7 +2087,7 @@ def compute_entropy_loss(logits, response_mask, loss_agg_mode: str = "token-mean
     return entropy_loss
 
 
-def compute_value_loss(
+def compute_value_loss( # J：计算 Critic Loss
     vpreds: torch.Tensor,
     returns: torch.Tensor,
     values: torch.Tensor,
@@ -2115,16 +2120,17 @@ def compute_value_loss(
         vf_clipfrac (float):
             Fraction of elements where the clipped loss was used.
     """
+    # J: values 是旧的价值网络，这里是 RLHF 中很常见的 Critic 更新方式，可用于得到更加稳定的结果
     vpredclipped = verl_F.clip_by_value(vpreds, values - cliprange_value, values + cliprange_value)
     vf_losses1 = (vpreds - returns) ** 2
     vf_losses2 = (vpredclipped - returns) ** 2
     clipped_vf_losses = torch.max(vf_losses1, vf_losses2)
     vf_loss = 0.5 * agg_loss(loss_mat=clipped_vf_losses, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
     vf_clipfrac = verl_F.masked_mean(torch.gt(vf_losses2, vf_losses1).float(), response_mask)
-    return vf_loss, vf_clipfrac
+    return vf_loss, vf_clipfrac # J：返回 Loss 和 clip 比例
 
 
-def kl_penalty(logprob: torch.FloatTensor, ref_logprob: torch.FloatTensor, kl_penalty) -> torch.FloatTensor:
+def kl_penalty(logprob: torch.FloatTensor, ref_logprob: torch.FloatTensor, kl_penalty) -> torch.FloatTensor: # J：计算 KL 散度（按照 kl_penalty 的类型 k1, k2, k3 计算 KL 散度），根据输入是否提供了 "+", 来判断是否使用 straight through trick
     """Compute KL divergence given logprob and ref_logprob. Optionally using straight through to bind k2 on other
     kl penalty compute method for unbiased KL gradient estimation.
     See more description in http://joschu.net/blog/kl-approx.html
@@ -2137,22 +2143,25 @@ def kl_penalty(logprob: torch.FloatTensor, ref_logprob: torch.FloatTensor, kl_pe
         kl_estimate
     """
     # Strip the optional '+' suffix so e.g. "k3+" dispatches to "k3".
-    base_kl_penalty = kl_penalty[:-1] if kl_penalty.endswith("+") else kl_penalty
-    forward_score = kl_penalty_forward(logprob, ref_logprob, base_kl_penalty)
-    if not kl_penalty.endswith("+") or kl_penalty in ("mse", "k2"):
-        return forward_score
+    # J：+ 用于控制是否使用 straight through trick，+ 号说明使用，不加说明不使用，k2 形式直接返回 KL 散度
+    base_kl_penalty = kl_penalty[:-1] if kl_penalty.endswith("+") else kl_penalty # J：如果提供了 "+", 则去掉 "+"
+    forward_score = kl_penalty_forward(logprob, ref_logprob, base_kl_penalty) # J：根据 base_kl_penalty 指定的类型（k1, k2, k3）计算 KL 散度
+    if not kl_penalty.endswith("+") or kl_penalty in ("mse", "k2"): # J：如果没有提供 "+", 或者是 k2 形式，直接返回 KL 散度（因为 k2 的梯度是 KL 的梯度）
+        return forward_score # J：直接返回 KL 散度, 因为 k2 的梯度是 KL 的梯度
 
     """
     The expectation of k1 and k3 estimator is the expected value of KL, but the expected gradient of k1 and k3
     estimator is not the expected gradient of KL. On the other hand k2 estimator gives right gradient estimator, 
     so we use a straight through trick here if the kl_penalty method ends with '+', e.g., k3+. 
     """
-    backward_score = 0.5 * (logprob - ref_logprob).square()
+    # J: 如果是 k1+ 或 k3+ 形式，+ 号说明使用 straight through trick，不加说明不使用，k2 形式直接返回 KL 散度
+    backward_score = 0.5 * (logprob - ref_logprob).square() # J：计算 KL 散度的梯度（即 k2 的梯度）
 
+    # J：这里是 straight through trick 的实现，将 k2 的梯度绑定到 KL 散度上，确保 KL 散度的梯度是 k2 的梯度（同时保持 KL 散度的期望值不变）
     return backward_score - backward_score.detach() + forward_score.detach()
 
 
-def kl_penalty_forward(logprob: torch.FloatTensor, ref_logprob: torch.FloatTensor, kl_penalty) -> torch.FloatTensor:
+def kl_penalty_forward(logprob: torch.FloatTensor, ref_logprob: torch.FloatTensor, kl_penalty) -> torch.FloatTensor: # J: 根据 kl_penalty（指定 k1，k2，k3 等）计算 KL 散度
     """Compute KL divergence given logprob and ref_logprob.
     Copied from https://github.com/huggingface/trl/blob/main/trl/trainer/ppo_trainer.py#L1104
     See more description in http://joschu.net/blog/kl-approx.html
@@ -2164,18 +2173,18 @@ def kl_penalty_forward(logprob: torch.FloatTensor, ref_logprob: torch.FloatTenso
     Returns:
         kl_estimate
     """
-    if kl_penalty in ("kl", "k1"):
+    if kl_penalty in ("kl", "k1"): # J：kl 默认认为是 k1
         return logprob - ref_logprob
 
-    if kl_penalty == "abs":
+    if kl_penalty == "abs": # J: abs 形式，本质是 k1 的绝对值形式（在数据量不够大时，k1 是可能为负的）
         return (logprob - ref_logprob).abs()
 
-    if kl_penalty in ("mse", "k2"):
+    if kl_penalty in ("mse", "k2"): # J: k2 也可以叫做 mse 形式，因为 k2 的本质是一个均方误差形式
         return 0.5 * (logprob - ref_logprob).square()
 
     # J. Schulman. Approximating kl divergence, 2020.
     # # URL http://joschu.net/blog/kl-approx.html.
-    if kl_penalty in ("low_var_kl", "k3"):
+    if kl_penalty in ("low_var_kl", "k3"): # J：k3 又名 low_var_kl，最早认为 k3 是低方差的 KL 散度估计器（但是 k3 相对 k2 可以认为包含了一个指数项，有时候极端异常值会比较大）
         kl = ref_logprob - logprob
         # For numerical stability
         kl = torch.clamp(kl, min=-20, max=20)
@@ -2269,7 +2278,7 @@ def compute_pf_ppo_reweight_data(
     return resampled_data
 
 
-def compute_policy_loss_reinforce(
+def compute_policy_loss_reinforce( # J：跟 GPG 实现完全一致，仅仅是多了个 kl 上报指标，这个函数会被 compute_policy_loss_bypass_mode 中的 loss_type="reinforce" 调用
     rollout_log_prob: torch.Tensor,
     log_prob: torch.Tensor,
     advantages: torch.Tensor,
@@ -2350,7 +2359,7 @@ def compute_policy_loss_reinforce(
 
 
 @register_policy_loss("bypass_mode")
-def compute_policy_loss_bypass_mode(
+def compute_policy_loss_bypass_mode( # J：调用了 compute_policy_loss_reinforce 方法（compute_policy_loss_reinforce 这个方法实现跟 GPG 一样）
     old_log_prob: torch.Tensor,
     log_prob: torch.Tensor,
     advantages: torch.Tensor,

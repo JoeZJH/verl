@@ -18,10 +18,10 @@ from verl.experimental.reward_loop.reward_manager.base import RewardManagerBase
 
 __all__ = ["register", "get_reward_manager_cls"]
 
-REWARD_MANAGER: dict[str, type[RewardManagerBase]] = {}
+REWARD_MANAGER: dict[str, type[RewardManagerBase]] = {} # J：存储已注册的 RewardManager 类，目前包含 native, gdpo, remote 和 dapo 等
 
 
-def register(name: str) -> Callable[[type[RewardManagerBase]], type[RewardManagerBase]]:
+def register(name: str) -> Callable[[type[RewardManagerBase]], type[RewardManagerBase]]: # J：注册 RewardManager 类的装饰器
     """Decorator to register a reward manager class with a given name.
 
     Args:
@@ -32,13 +32,13 @@ def register(name: str) -> Callable[[type[RewardManagerBase]], type[RewardManage
     def decorator(cls: type[RewardManagerBase]) -> type[RewardManagerBase]:
         if name in REWARD_MANAGER and REWARD_MANAGER[name] != cls:
             raise ValueError(f"reward manager {name} has already been registered: {REWARD_MANAGER[name]} vs {cls}")
-        REWARD_MANAGER[name] = cls
+        REWARD_MANAGER[name] = cls # J：将 RewardManager 类注册到字典中
         return cls
 
     return decorator
 
 
-def get_reward_manager_cls(name: str) -> type[RewardManagerBase]:
+def get_reward_manager_cls(name: str) -> type[RewardManagerBase]: # J：根据名称获取 RewardManager 类
     """Get the reward manager class with a given name.
 
     Args:

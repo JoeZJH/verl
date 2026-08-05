@@ -73,7 +73,7 @@ from verl.workers.rollout.llm_server import LLMServerManager
 from verl.workers.utils.padding import left_right_2_no_padding, no_padding_2_padding
 
 
-def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.AdaptiveKLController, kl_penalty="kl"):
+def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.AdaptiveKLController, kl_penalty="kl"): # J：对奖励添加 KL 散度惩罚
     """Apply KL penalty to the token-level rewards.
 
     This function computes the KL divergence between the reference policy and current policy,
@@ -90,26 +90,29 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.AdaptiveKLController, 
             - A dictionary of metrics related to the KL penalty
     """
     response_mask = data.batch["response_mask"]
-    token_level_scores = data.batch["token_level_scores"]
+    token_level_scores = data.batch["token_level_scores"] # J：GDPO 场景当前也抽取这个字段吗？
     batch_size = data.batch.batch_size[0]
 
     # compute kl between ref_policy and current policy
     # When apply_kl_penalty, algorithm.use_kl_in_reward=True, so the reference model has been enabled.
-    kld = core_algos.kl_penalty(
+    kld = core_algos.kl_penalty( # J：计算 KL 散度，根据 config 中的配置
         data.batch["old_log_probs"], data.batch["ref_log_prob"], kl_penalty=kl_penalty
     )  # (batch_size, response_length)
     kld = kld * response_mask
     beta = kl_ctrl.value
 
-    token_level_rewards = token_level_scores - beta * kld
+    token_level_rewards = token_level_scores - beta * kld # J：用 score 减去 KL 散度的惩罚，作为奖励
 
+    # J：计算当前 KL 散度的平均值（seq-mean-token-mean），用于更新 KL 系数
     current_kl = masked_mean(kld, mask=response_mask, axis=-1)  # average over sequence
     current_kl = torch.mean(current_kl, dim=0).item()
 
     # according to https://github.com/huggingface/trl/blob/951ca1841f29114b969b57b26c7d3e80a39f75a0/trl/trainer/ppo_trainer.py#L837
-    kl_ctrl.update(current_kl=current_kl, n_steps=batch_size)
+    kl_ctrl.update(current_kl=current_kl, n_steps=batch_size) # J：根据当前 KL 散度和步数，更新 KL 系数，可能是自适应的（朝预定的 KL 目标值调整），也可能是固定值
     data.batch["token_level_rewards"] = token_level_rewards
 
+    # J: "actor/reward_kl_penalty" 是当前 KL 散度的平均值（seq-mean-token-mean），用于更新 KL 系数，也用于上报指标
+    # J: "actor/reward_kl_penalty_coeff" 是当前 KL 系数（AdaptiveKLController 中，这个值会变化）
     metrics = {"actor/reward_kl_penalty": current_kl, "actor/reward_kl_penalty_coeff": beta}
 
     return data, metrics
@@ -133,7 +136,7 @@ def compute_response_mask(data: DataProto): # J：计算 Response 部分的注�
     return attention_mask[:, -response_length:] # J：对注意力掩码进行截断，仅返回 Response 部分的注意力掩码
 
 
-def compute_spec_decode_metrics(
+def compute_spec_decode_metrics( # J：计算 speculative decoding 指标，如 accept_rate, accept_length, etc
     spec_drafts,
     spec_accepts,
     spec_verifies,
@@ -182,7 +185,7 @@ def compute_spec_decode_metrics(
     }
 
 
-def compute_advantage(
+def compute_advantage( # J：计算 advantage 估计
     data: DataProto,
     adv_estimator: AdvantageEstimator,
     gamma: float = 1.0,
@@ -213,9 +216,9 @@ def compute_advantage(
     if "response_mask" not in data.batch.keys():
         data.batch["response_mask"] = compute_response_mask(data)
     # prepare response group
-    if adv_estimator == AdvantageEstimator.GAE:
+    if adv_estimator == AdvantageEstimator.GAE: # J: GAE 估计 模式
         # Compute advantages and returns using Generalized Advantage Estimation (GAE)
-        advantages, returns = core_algos.compute_gae_advantage_return(
+        advantages, returns = core_algos.compute_gae_advantage_return( # J：计算 GAE 估计 的 advantage 和 returns
             token_level_rewards=data.batch["token_level_rewards"],
             values=data.batch["values"],
             response_mask=data.batch["response_mask"],
@@ -230,22 +233,22 @@ def compute_advantage(
                 config.pf_ppo.get("reweight_method"),
                 config.pf_ppo.get("weight_pow"),
             )
-    elif adv_estimator == AdvantageEstimator.GRPO:
+    elif adv_estimator == AdvantageEstimator.GRPO: # J: GRPO 估计 模式
         # Initialize the mask for GRPO calculation
         grpo_calculation_mask = data.batch["response_mask"]
 
         # Call compute_grpo_outcome_advantage with parameters matching its definition
-        advantages, returns = core_algos.compute_grpo_outcome_advantage(
+        advantages, returns = core_algos.compute_grpo_outcome_advantage( # J：计算 GRPO 估计 的 advantage
             token_level_rewards=data.batch["token_level_rewards"],
             response_mask=grpo_calculation_mask,
-            index=data.non_tensor_batch["uid"],
+            index=data.non_tensor_batch["uid"], # J：用于分组计算 GRPO advantage 的 uid
             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
         )
         data.batch["advantages"] = advantages
         data.batch["returns"] = returns
-    else:
+    else: # J： 其他 advantage 估计 模式
         # handle all other adv estimator type other than GAE and GRPO
-        adv_estimator_fn = core_algos.get_adv_estimator_fn(adv_estimator)
+        adv_estimator_fn = core_algos.get_adv_estimator_fn(adv_estimator) # J：获取 advantage 估计函数，其实 GRPO 和 GAE 也可以合并代码以后走这里，只是现在把它们的计算逻辑放到了其他分支中
         adv_kwargs = {
             "token_level_rewards": data.batch["token_level_rewards"],
             "response_mask": data.batch["response_mask"],
@@ -256,7 +259,7 @@ def compute_advantage(
         if "reward_baselines" in data.batch:  # optional
             adv_kwargs["reward_baselines"] = data.batch["reward_baselines"]
         # GDPO: pass raw data for per-dimension reward extraction
-        if adv_estimator in (AdvantageEstimator.GDPO, "gdpo"):
+        if adv_estimator in (AdvantageEstimator.GDPO, "gdpo"): # J: GDPO 估计 模式
             adv_kwargs["non_tensor_batch"] = data.non_tensor_batch
             adv_kwargs["batch"] = data.batch
         # Add sum_pi_squared for Optimal Token Baseline
@@ -465,15 +468,15 @@ class RayPPOTrainer:
     def _write_generations(inputs, outputs, gts, scores, reward_extra_infos_dict, dump_path, global_steps): # J：写出生成样本到 JSONL 文件
         """Write generation samples as JSONL (runs in background thread)."""
         os.makedirs(dump_path, exist_ok=True)
-        filename = os.path.join(dump_path, f"{global_steps}.jsonl")
+        filename = os.path.join(dump_path, f"{global_steps}.jsonl") # J：生成 JSONL 文件名，格式为 ./${global_steps}.jsonl
 
         n = len(inputs)
-        base_data = {
+        base_data = { # J：写出内容包含输入、输出、 ground_truth、分数、step 等
             "input": inputs,
             "output": outputs,
             "gts": gts,
-            "score": scores,
-            "step": [global_steps] * n,
+            "score": scores, # J：每个样本的分数
+            "step": [global_steps] * n, # J：这里是生成一个 长度为 n 的列表，每个元素都是 global_steps，保持与输入样本的对应关系，方便后续展开和组合后通过 step 来筛选样本
         }
 
         for k, v in reward_extra_infos_dict.items():
@@ -485,7 +488,7 @@ class RayPPOTrainer:
                 entry = {k: v[i] for k, v in base_data.items()}
                 f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
 
-        print(f"Dumped generations to {filename}")
+        print(f"Dumped generations to {filename}") # J：打印 dump 生成样本的 JSONL 文件名，说明已经完成写入
 
     def _dump_generations(self, inputs, outputs, gts, scores, reward_extra_infos_dict, dump_path): # J：异步 dump 生成样本到 JSONL 文件
         """Dump rollout/validation samples as JSONL asynchronously."""
@@ -497,7 +500,7 @@ class RayPPOTrainer:
             gts,
             scores,
             reward_extra_infos_dict,
-            dump_path,
+            dump_path, # J：dump 生成样本的路径
             global_steps,
         )
         self._dump_futures.append(future) # J：将 dump 任务添加到 dump_futures 列表中
@@ -537,7 +540,7 @@ class RayPPOTrainer:
             inputs = self.tokenizer.batch_decode(batch.batch["prompts"], skip_special_tokens=True)
             outputs = self.tokenizer.batch_decode(batch.batch["responses"], skip_special_tokens=True)
             scores = batch.batch["token_level_scores"].sum(-1).cpu().tolist()
-            # J：sample_gts 存储每个样本的 ground_truth，gts 是 ground_truths 的简称？
+            # J：sample_gts 存储每个样本的 ground_truth，gts 应该是 ground_truths 的简称？
             sample_gts = [item.non_tensor_batch.get("reward_model", {}).get("ground_truth", None) for item in batch]
 
             reward_extra_infos_to_dump = { # J：将 reward_extra_infos_dict 中的每个值转换为列表，方便 dump 到 JSONL 文件
@@ -555,7 +558,7 @@ class RayPPOTrainer:
                 gts=sample_gts,
                 scores=scores,
                 reward_extra_infos_dict=reward_extra_infos_to_dump,
-                dump_path=rollout_data_dir,
+                dump_path=rollout_data_dir, # J：dump 生成样本的路径
             )
 
     def _maybe_log_val_generations(self, inputs, outputs, scores):
@@ -932,7 +935,7 @@ class RayPPOTrainer:
 
         # we should create rollout at the end so that vllm can have a better estimation of kv cache memory
         self.actor_rollout_wg = all_wg[str(actor_role)] # J：actor_role 是 Role.ActorRolloutRef 或 Role.ActorRollout
-        self.actor_rollout_wg.init_model() # J：@ActorRolloutRefWorker 定义 init_model() 方法，verl.workers.engine_workers.ActorRolloutRefWorker.init_model
+        self.actor_rollout_wg.init_model() # J：@ActorRolloutRefWorker 定义 init_model() 方法，verl.workers.engine_workers.ActorRolloutRefWorker.init_model，这里还会完成 loss_fn 绑定等
 
         if self.ref_in_actor:
             self.ref_policy_wg = self.actor_rollout_wg
@@ -1018,16 +1021,16 @@ class RayPPOTrainer:
         # sleep all replicas to load checkpoint
         self.checkpoint_manager.sleep_replicas()
 
-    def _save_checkpoint(self):
+    def _save_checkpoint(self): # J：保存 ckpt
         from verl.utils.fs import local_mkdir_safe
 
         # path: given_path + `/global_step_{global_steps}` + `/actor`
-        local_global_step_folder = os.path.join(
+        local_global_step_folder = os.path.join( # J: 保存路径格式为 default_local_dir/global_step_{global_steps}
             self.config.trainer.default_local_dir, f"global_step_{self.global_steps}"
         )
 
         print(f"local_global_step_folder: {local_global_step_folder}")
-        actor_local_path = os.path.join(local_global_step_folder, "actor")
+        actor_local_path = os.path.join(local_global_step_folder, "actor") # J: 保存路径格式为 default_local_dir/global_step_{global_steps}/actor
 
         actor_remote_path = (
             None
@@ -1035,7 +1038,9 @@ class RayPPOTrainer:
             else os.path.join(self.config.trainer.default_hdfs_dir, f"global_step_{self.global_steps}", "actor")
         )
 
-        remove_previous_ckpt_in_save = self.config.trainer.get("remove_previous_ckpt_in_save", False)
+        # J：注：非常有用的功能，可以配置在保存检查点时删除之前的检查点，避免占用磁盘空间，但需要小心删除掉需要的 ckpt
+        # J：以后建议使用 max_actor_ckpt_to_keep 和 max_critic_ckpt_to_keep 来配置保留的 ckpt 数量
+        remove_previous_ckpt_in_save = self.config.trainer.get("remove_previous_ckpt_in_save", False) # J: 是否在保存检查点时删除之前的检查点
         if remove_previous_ckpt_in_save:
             print(
                 "Warning: remove_previous_ckpt_in_save is deprecated,"
@@ -1048,12 +1053,12 @@ class RayPPOTrainer:
             self.config.trainer.get("max_critic_ckpt_to_keep", None) if not remove_previous_ckpt_in_save else 1
         )
 
-        self.actor_rollout_wg.save_checkpoint(
+        self.actor_rollout_wg.save_checkpoint( # J：保存 actor ckpt，如果配置了 config.actor_rollout_ref.actor.checkpoint.async_save 为 True，则会立刻返回，否则阻塞直到完成 ckpt 存储（详情见 verl.trainer.config.CheckpointConfig）
             actor_local_path, actor_remote_path, self.global_steps, max_ckpt_to_keep=max_actor_ckpt_to_keep
         )
 
         if self.use_critic:
-            critic_local_path = os.path.join(local_global_step_folder, str(Role.Critic))
+            critic_local_path = os.path.join(local_global_step_folder, str(Role.Critic)) # J: 保存路径格式为 default_local_dir/global_step_{global_steps}/critic
             critic_remote_path = (
                 None
                 if self.config.trainer.default_hdfs_dir is None
@@ -1061,17 +1066,20 @@ class RayPPOTrainer:
                     self.config.trainer.default_hdfs_dir, f"global_step_{self.global_steps}", str(Role.Critic)
                 )
             )
-            self.critic_wg.save_checkpoint(
+            # J：特别说明，Critic 和 Actor 可以分开指定同步 或 异步
+            self.critic_wg.save_checkpoint( # J：保存 critic ckpt，如果配置了 config.critic.checkpoint.async_save 为 True，则会立刻返回，否则阻塞直到完成 ckpt 存储（详情见 verl.trainer.config.CheckpointConfig）
                 critic_local_path, critic_remote_path, self.global_steps, max_ckpt_to_keep=max_critic_ckpt_to_keep
             )
 
         # save dataloader
+        # J：保存 dataloader 状态字典到文件，方便恢复训练
         local_mkdir_safe(local_global_step_folder)
-        dataloader_local_path = os.path.join(local_global_step_folder, "data.pt")
+        dataloader_local_path = os.path.join(local_global_step_folder, "data.pt") # J: 保存路径格式为 default_local_dir/global_step_{global_steps}/data.pt
         dataloader_state_dict = self.train_dataloader.state_dict()
         torch.save(dataloader_state_dict, dataloader_local_path)
 
         # latest checkpointed iteration tracker (for atomic usage)
+        # J：问题：这里为什么只根据 Actor 是否异步来判断，Critic 不用关注吗？（Critic 和 Actor 是可以分开指定是否异步 save 的）
         if (
             hasattr(self.config.actor_rollout_ref.actor.checkpoint, "async_save")
             and self.config.actor_rollout_ref.actor.checkpoint.async_save
@@ -1080,12 +1088,13 @@ class RayPPOTrainer:
             and self.config.actor_rollout_ref.actor.checkpoint["async_save"]
         ):
             print("skip write latest_checkpointed_iteration.txt when async_save is True")
-            return
-        local_latest_checkpointed_iteration = os.path.join(
+            return # J: 当 async_save 为 True 时，不写入 latest_checkpointed_iteration.txt 文件
+        # J：将最新保存的 global_steps 写入 latest_checkpointed_iteration.txt 文件（当看到这个文件的内容时，就知道这个 global_steps 已经完成 save 了）
+        local_latest_checkpointed_iteration = os.path.join( # J: 保存路径格式为 default_local_dir/latest_checkpointed_iteration.txt
             self.config.trainer.default_local_dir, "latest_checkpointed_iteration.txt"
         )
         with open(local_latest_checkpointed_iteration, "w") as f:
-            f.write(str(self.global_steps))
+            f.write(str(self.global_steps)) # J: 写入最新保存的 global_steps 到 latest_checkpointed_iteration.txt 文件
 
     def _load_checkpoint(self):
         if self.config.trainer.resume_mode == "disable":
@@ -1268,19 +1277,19 @@ class RayPPOTrainer:
         )
         metrics.update(global_balance_stats) # J：更新 metrics 中 sequence length 不平衡相关的指标
 
-    def _compute_values(self, batch: DataProto) -> DataProto:
+    def _compute_values(self, batch: DataProto) -> DataProto: # J：执行一次推理，获取更新前的 Critic 预估值（values），返回 batch["values"] 字段的 DataProto 类型
         batch_td = batch.to_tensordict()
         # step 2: convert from padding to nopadding
         batch_td = left_right_2_no_padding(batch_td)
         # step 3: add meta info
         tu.assign_non_tensor(batch_td, compute_loss=False)
-        output = self.critic_wg.infer_batch(batch_td)
+        output = self.critic_wg.infer_batch(batch_td) # J：执行一次推理，获取更新前的 Critic 预估值（values）
         output = output.get()
-        values = tu.get(output, "values")
+        values = tu.get(output, "values") # J：获取 values 字段
         values = no_padding_2_padding(values, batch_td)
         values = tu.get_tensordict({"values": values.float()})
-        values = DataProto.from_tensordict(values)
-        return values
+        values = DataProto.from_tensordict(values) # J：将 values 字段转换为 DataProto 类型
+        return values # J：返回 values 字段
 
     def _compute_ref_log_prob(self, batch: DataProto) -> DataProto: # J：计算 "ref" 的 log_probs，回填到 batch["ref_log_prob"] 字段
         # step 1: convert dataproto to tensordict.
@@ -1290,8 +1299,14 @@ class RayPPOTrainer:
         # step 3: add meta info
         metadata = {"calculate_entropy": False, "compute_loss": False}
         if self.ref_in_actor:
-            metadata["no_lora_adapter"] = True
-        tu.assign_non_tensor(batch_td, **metadata)
+            metadata["no_lora_adapter"] = True # J：核心参数，用于标记使用 Reference 模型推理而不是 Actor 推理
+        # J：关于区分 使用 actor 还是 Reference 模型的理解：
+        # J：情况1：不使用 lora，则一定有 ref_in_actor=False，此时不能在 Actor 中找到 Reference
+        # J：情况2：使用 LoRA，则有 ref_in_actor=True
+        # J：    情况2.1：此时当设置 no_lora_adapter=True 时，表示不加载 LoRA，只使用最早的 Base，即 Reference
+        # J：    情况2.2：此时当设置 no_lora_adapter=False 时，表示加载 LoRA，只使用 Base + LoRA，实现得到 Actor（ old 策略）
+
+        tu.assign_non_tensor(batch_td, **metadata) # J：添加元信息，标记不需要计算 entropy，也不计算 loss
         if self.ref_in_actor:
             output = self.actor_rollout_wg.compute_log_prob(batch_td)
         else:
@@ -1316,11 +1331,11 @@ class RayPPOTrainer:
         calculate_sum_pi_squared = self.config.actor_rollout_ref.actor.get("calculate_sum_pi_squared", False)
         tu.assign_non_tensor(
             batch_td,
-            calculate_entropy=True,
+            calculate_entropy=True, # J：标记需要计算 entropy，在后续多层调用后，会根据 logits 计算出熵并存下来
             calculate_sum_pi_squared=calculate_sum_pi_squared,
             compute_loss=False,
         )
-        output = self.actor_rollout_wg.compute_log_prob(batch_td) # J：计算 old_log_probs，到这里时，其实 \pi_{old} 等于 \pi_{\theta}
+        output = self.actor_rollout_wg.compute_log_prob(batch_td) # J：计算 old_log_probs，到这里时，其实 \pi_{old} 等于 \pi_{\theta}，所以直接对 actor 进行前向推理得到的结果就是 old_log_probs
         # gather output
         entropy = tu.get(output, "entropy")
         log_probs = tu.get(output, "log_probs")
@@ -1343,7 +1358,7 @@ class RayPPOTrainer:
         old_log_prob = DataProto.from_tensordict(old_log_prob)
         return old_log_prob, old_log_prob_mfu # J：返回 old_log_probs(DataProto, 包含 old_log_probs, entropys, routed_experts, sum_pi_squared 等 key)  和 old_log_prob_mfu(torch.Tensor, 是计算 old_log_probs 的 mfu 指标)
 
-    def _update_actor(self, batch: DataProto) -> DataProto:
+    def _update_actor(self, batch: DataProto) -> DataProto: # J：更新 Actor 网络，核心函数
         rollout_config = self.config.actor_rollout_ref.rollout
         batch.meta_info["multi_turn"] = rollout_config.multi_turn.enable
         # TODO: Make "temperature" single source of truth from generation.
@@ -1376,7 +1391,7 @@ class RayPPOTrainer:
             dataloader_kwargs={"shuffle": shuffle},
             compute_loss=True,
         )
-        actor_output = self.actor_rollout_wg.update_actor(batch_td) # J：更新 Actor 网络
+        actor_output = self.actor_rollout_wg.update_actor(batch_td) # J：更新 Actor 网络（核心函数）
         actor_output = tu.get(actor_output, "metrics")
         actor_output = rename_dict(actor_output, "actor/")
         # modify key name
@@ -1488,7 +1503,7 @@ class RayPPOTrainer:
                 metrics = {} # J：重置 metrics 字典
                 timing_raw = {} # J：重置 timing_raw 字典
 
-                with marked_timer("start_profile", timing_raw):
+                with marked_timer("start_profile", timing_raw): # J: 这里 start_profile 是记录开启 profiling 所需要 的时间消耗 key，理解：开启 profile 本身就需要时间
                     # J：在指定的训练 step 上，向 actor_rollout / ref_policy / critic 三个 worker group 广播开启性能采集（torch profiler / nsys / NVTX / 内存快照 / 精度调试器等）
                     # J：所以这是一次 Ray RPC 广播，所有 rank 上的 DistProfiler.start() 都会被触发
                     # J：特别说明：训练动辄成千上万 step，全程 profiling 既慢又产文件巨大。verl 用"按 step 精确采样 + 可选连续段"的方式，让用户只对感兴趣的 step（如 warmup 后的几个 step）做性能/内存/精度分析，便于排查训练瓶颈、显存占用、数值精度等问题
@@ -1531,7 +1546,7 @@ class RayPPOTrainer:
                     num_sampled_prompts = len(gen_batch_output)
 
                 is_last_step = self.global_steps >= self.total_training_steps # J：判断是否是最后一步
-                with marked_timer("step", timing_raw): # J：记录 step 时间， timing_raw 是用于存储 step 时间的字典
+                with marked_timer("step", timing_raw): # J：记录 step 时间(这里是整个 step 的时间，包括生成、奖励评估、更新等)， timing_raw 是用于存储 step 时间的字典
                     # generate a batch
                     with marked_timer("gen", timing_raw, color="red"): # J：开始生成阶段并记录生成时间，时间上报到 timing_raw 字典中 {"gen": 生成时间}
                         if curr_step_profile: # J：如果当前 step 开启了性能采集
@@ -1598,8 +1613,11 @@ class RayPPOTrainer:
                         # compute reward model score
                         if self.use_rm and "rm_scores" not in batch.batch.keys():
                             batch_reward = self._compute_reward_colocate(batch) # J：计算 reward score 并返回包含 rm_scores 张量和 reward_extra_info 字段的 DataProto 对象，注：仅每个样本的最后一个 Response token 被赋值，其余 Token 都是 0
+                            # J: 特别说明：自定义的 奖励函数中，可以返回任意
                             batch = batch.union(batch_reward) # J：将 batch_reward 合并到 batch 中(不是按照行合并，是按照 key 合并)，合并后就有了 “rm_scores” 张量
 
+                        # J：问题，score 指标（原始模型打分）似乎没有被上报到 metrics 中？
+                        # J：回答：上报了，在后面的 compute_data_metrics 函数中收集到 critic/score/xxx 指标中，然后汇总以后上报的
                         # extract reward_tensor and reward_extra_infos_dict for training
                         reward_tensor, reward_extra_infos_dict = extract_reward(batch) # J：从 batch 中提取 reward_tensor（"rm_scores"） 和 reward_extra_infos_dict（meta_info["reward_extra_keys"] 对应的 non_tensor_batch 中的数据） 字段
 
@@ -1620,22 +1638,23 @@ class RayPPOTrainer:
                     else:  # Recompute old_log_probs； J：重新计算 old_log_probs，作为 proximal anchor
                         with marked_timer("old_log_prob", timing_raw, color="blue"):
                             old_log_prob, old_log_prob_mfu = self._compute_old_log_prob(batch) # J：计算 old_log_probs，包含 ”entropy" 字段和 “old_log_probs” 字段 等
-                            entropys = old_log_prob.batch["entropys"]
-                            response_masks = batch.batch["response_mask"]
+                            entropys = old_log_prob.batch["entropys"] # J：从 old_log_prob 中提取 entropy 字段，这里的熵是 Token 粒度的，shape = [batch_size*rollout_n, seq_len]
+                            response_masks = batch.batch["response_mask"] # J：shape 与 entropys 相同
                             actor_config = self.config.actor_rollout_ref.actor
                             entropy_agg = agg_loss( # J：聚合 entropy（根据 loss_agg_mode 聚合，类似 loss 聚合一样）
                                 loss_mat=entropys,
                                 loss_mask=response_masks,
-                                loss_agg_mode=actor_config.loss_agg_mode,
-                                loss_scale_factor=actor_config.loss_scale_factor,
+                                loss_agg_mode=actor_config.loss_agg_mode, # J：聚合 entropy 的方式，复用 actor loss 的 loss_agg_mode 配置
+                                loss_scale_factor=actor_config.loss_scale_factor, # J：聚合 entropy 的缩放因子，复用 actor loss 的 loss_scale_factor 配置
                             )
                             old_log_prob_metrics = {
-                                "actor/entropy": entropy_agg.detach().item(),
-                                "perf/mfu/actor_infer": old_log_prob_mfu,
+                                "actor/entropy": entropy_agg.detach().item(), # J：上报熵
+                                "perf/mfu/actor_infer": old_log_prob_mfu, # J：上报 actor 推理时间
                             }
                             metrics.update(old_log_prob_metrics)
                             old_log_prob.batch.pop("entropys")
                             if "routed_experts" in batch.batch and "routed_experts" in old_log_prob.batch:
+                                # J：不能同时使用 R2 模式和 R3 模式，R2: "routed_experts" in batch.batch; R3: "routed_experts" in old_log_prob.batch
                                 raise ValueError(
                                     "Detected conflicting router replay configuration: "
                                     "router_replay.mode='R2' and enable_rollout_routing_replay=True "
@@ -1661,25 +1680,25 @@ class RayPPOTrainer:
                     # compute values
                     if self.use_critic:
                         with marked_timer("values", timing_raw, color="cyan"):
-                            values = self._compute_values(batch)
-                            batch = batch.union(values)
+                            values = self._compute_values(batch) # J：执行一次推理，获取更新前的 Critic 预估值（values），返回 batch["values"] 字段的 DataProto 类型
+                            batch = batch.union(values) # J：将 values 合并到 batch 中，添加 ["values"] 字段
 
                     with marked_timer("adv", timing_raw, color="brown"):
                         # we combine with rule-based rm
                         reward_extra_infos_dict: dict[str, list]
-                        batch.batch["token_level_scores"] = reward_tensor
+                        batch.batch["token_level_scores"] = reward_tensor # J：reward_tensor 是前面计算得到的 reward 信息，这里赋值为 token_level_scores，注意，从此不再是 rm_scores 字段
 
-                        if reward_extra_infos_dict:
+                        if reward_extra_infos_dict: # J：如果有 reward_extra_infos_dict，说明有额外的奖励信息，需要合并到 batch 中
                             batch.non_tensor_batch.update({k: np.array(v) for k, v in reward_extra_infos_dict.items()})
 
                         # compute rewards. apply_kl_penalty if available
                         if self.config.algorithm.use_kl_in_reward:
-                            batch, kl_metrics = apply_kl_penalty(
+                            batch, kl_metrics = apply_kl_penalty( # J：应用 KL 惩罚项，根据 config 中的配置
                                 batch, kl_ctrl=self.kl_ctrl_in_reward, kl_penalty=self.config.algorithm.kl_penalty
                             )
                             metrics.update(kl_metrics)
                         else:
-                            batch.batch["token_level_rewards"] = batch.batch["token_level_scores"]
+                            batch.batch["token_level_rewards"] = batch.batch["token_level_scores"] # J：包含 KL 惩罚的信息，这里赋值为 rewards
 
                         # Compute rollout correction: IS weights, rejection sampling, and metrics
                         # Only runs in decoupled mode (computes once per batch using stable π_old)
@@ -1687,21 +1706,21 @@ class RayPPOTrainer:
                         if (
                             rollout_corr_config is not None
                             and "rollout_log_probs" in batch.batch
-                            and not bypass_recomputing_logprobs  # Only in decoupled mode
+                            and not bypass_recomputing_logprobs  # Only in decoupled mode # J：bapass 模式下不会计算 megatron/FSDP 的策略 logprobs，此时使用的训推 logprobs 完全相同，训推策略比值永远为 1
                         ):
                             from verl.trainer.ppo.rollout_corr_helper import compute_rollout_correction_and_add_to_batch
 
                             # Compute IS weights, apply rejection sampling, compute metrics
-                            batch, is_metrics = compute_rollout_correction_and_add_to_batch(batch, rollout_corr_config)
+                            batch, is_metrics = compute_rollout_correction_and_add_to_batch(batch, rollout_corr_config) # J：计算 IS 和 RS 的效果，相关字段和指标都存到 batch 中
                             # IS and off-policy metrics already have rollout_corr/ prefix
                             metrics.update(is_metrics)
 
                         # compute advantages, executed on the driver process
                         norm_adv_by_std_in_grpo = self.config.algorithm.get(
-                            "norm_adv_by_std_in_grpo", True
+                            "norm_adv_by_std_in_grpo", True # J：默认对 GRPO 的 Advantage 进行归一化
                         )  # GRPO adv normalization factor
 
-                        batch = compute_advantage( # J：计算优势函数
+                        batch = compute_advantage( # J：计算 Advantage（核心函数），计算后的很多指标会直接添加到返回的 batch 里面
                             batch,
                             adv_estimator=self.config.algorithm.adv_estimator,
                             gamma=self.config.algorithm.gamma,
@@ -1716,21 +1735,23 @@ class RayPPOTrainer:
                         with marked_timer("update_critic", timing_raw, color="pink"):
                             critic_output = self._update_critic(batch) # J：更新 Critic 网络
                         critic_output_metrics = reduce_metrics(critic_output.meta_info["metrics"])
-                        metrics.update(critic_output_metrics)
+                        metrics.update(critic_output_metrics) # J：将 Critic 网络的指标合并到 metrics 中
 
                     # implement critic warmup
                     if self.config.trainer.critic_warmup > self.global_steps: # J：如果 Critic 网络的预热步数大于当前步数，继续预热
                         # Still in critic warmup, only update weights to wake up rollout replicas.
-                        # J：为什么需要同步 rollout replicas 的权重？
-                        self.checkpoint_manager.update_weights(self.global_steps)
+                        # J：为什么需要同步 rollout replicas 的权重？这里还在 Critic 网络，不需要同步 Rollout Replicas 的权重吧
+                        # J：理解，训练 Critic 也需要用到 Rollout 策略，所以是需要同步的，但是实际上只需要同步一次即可，这里是为了确保没问题（每个 step 都同步了一次，除了浪费时间，没有别的问题）
+                        self.checkpoint_manager.update_weights(self.global_steps) # J：将 Actor 网络的权重同步到 Rollout Replicas 中
                     else:
                         # update actor
                         with marked_timer("update_actor", timing_raw, color="red"):
                             actor_output = self._update_actor(batch) # J：更新 Actor 网络
 
+                        # J: 如果购买的是云厂商的 ESI 实例，需要检查是否接近过期时间，如果接近，强制保存检查点(真是贴心的设计)
                         # Check if the ESI (Elastic Server Instance)/training plan is close to expiration.
-                        esi_close_to_expiration = should_save_ckpt_esi(
-                            max_steps_duration=self.max_steps_duration,
+                        esi_close_to_expiration = should_save_ckpt_esi( # J：检查是否接近过期时间，暂时先不用管
+                            max_steps_duration=self.max_steps_duration, # J: 这里传入历史单步训练最长时间，用于预估单步训练需要的最长时间
                             redundant_time=self.config.trainer.esi_redundant_time,
                         )
                         # Check if the conditions for saving a checkpoint are met.
@@ -1744,18 +1765,18 @@ class RayPPOTrainer:
                             is_last_step
                             or self.global_steps % self.config.trainer.save_freq == 0
                             or esi_close_to_expiration
-                        ):
+                        ): # J：如果满足保存检查点的条件，保存检查点（1.最后一步；2.当前步数是 save_freq 的倍数；3. ESI 实例接近过期时间）
                             if esi_close_to_expiration:
                                 print("Force saving checkpoint: ESI instance expiration approaching.")
-                            with marked_timer("save_checkpoint", timing_raw, color="green"):
-                                self._save_checkpoint()
+                            with marked_timer("save_checkpoint", timing_raw, color="green"): # J：记录保存检查点的时间消耗
+                                self._save_checkpoint() # J：保存 ckpt
 
                         # update weights from trainer to rollout
                         with marked_timer("update_weights", timing_raw, color="red"):
                             self.checkpoint_manager.update_weights(self.global_steps) # J：更新 Actor 网络的权重到 rollout replicas
 
                         actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
-                        metrics.update(actor_output_metrics)
+                        metrics.update(actor_output_metrics) # J：将 Actor 更新相关的指标合并到 metrics 中
 
                     # Log rollout generations if enabled
                     rollout_data_dir = self.config.trainer.get("rollout_data_dir", None)
@@ -1763,8 +1784,8 @@ class RayPPOTrainer:
                         self._log_rollout_data(batch, reward_extra_infos_dict, timing_raw, rollout_data_dir) # J：异步 dump 生成样本到 JSONL 文件
 
                 # validate
-                if self.config.trainer.test_freq > 0 and (
-                    is_last_step or self.global_steps % self.config.trainer.test_freq == 0
+                if self.config.trainer.test_freq > 0 and ( # J：仅在 test_freq > 0 时，启动模型评估
+                    is_last_step or self.global_steps % self.config.trainer.test_freq == 0 # J：在最后一步或当前步数是 test_freq 的倍数时，评估模型
                 ):
                     with marked_timer("testing", timing_raw, color="green"):
                         val_metrics: dict = self._validate() # J：评估当前模型
@@ -1772,7 +1793,8 @@ class RayPPOTrainer:
                             last_val_metrics = val_metrics
                     metrics.update(val_metrics)
 
-                with marked_timer("stop_profile", timing_raw):
+                # J：注：到这里本 Step 训练已经完成了
+                with marked_timer("stop_profile", timing_raw): # J：记录停止 profile 所需要 的时间消耗，注：停止 profiling 本身也需要时间
                     next_step_profile = (
                         self.global_steps + 1 in self.config.global_profiler.steps
                         if self.config.global_profiler.steps is not None
@@ -1786,8 +1808,8 @@ class RayPPOTrainer:
                     prev_step_profile = curr_step_profile
                     curr_step_profile = next_step_profile
 
-                steps_duration = timing_raw["step"]
-                self.max_steps_duration = max(self.max_steps_duration, steps_duration)
+                steps_duration = timing_raw["step"] # J：获取当前 Step 训练的时间消耗
+                self.max_steps_duration = max(self.max_steps_duration, steps_duration) # J：更新历史单步训练最长时间
 
                 # training metrics
                 metrics.update(
@@ -1797,29 +1819,29 @@ class RayPPOTrainer:
                     }
                 )
                 # collect metrics
-                metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
+                metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic)) # J：收集数据指标（奖励、损失、梯度范数等）用于上报
                 # GDPO per-component reward metrics
-                gdpo_reward_keys = self.config.algorithm.get("gdpo_reward_keys", None)
+                gdpo_reward_keys = self.config.algorithm.get("gdpo_reward_keys", None) # J: 配置示例 '["accuracy_reward", "format_reward"]'
                 if gdpo_reward_keys and self.config.algorithm.adv_estimator in ("gdpo", AdvantageEstimator.GDPO):
-                    for key in gdpo_reward_keys:
+                    for key in gdpo_reward_keys: # J：针对 GDPO，分维度分别上报信息（这里应该是每个 维度的奖励信息）
                         if key in batch.non_tensor_batch:
                             vals = np.asarray(batch.non_tensor_batch[key], dtype=np.float32)
                             metrics[f"gdpo/{key}/mean"] = float(np.mean(vals))
                             metrics[f"gdpo/{key}/std"] = float(np.std(vals))
                             metrics[f"gdpo/{key}/max"] = float(np.max(vals))
                             metrics[f"gdpo/{key}/min"] = float(np.min(vals))
-                metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
+                metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw)) # J：上报各阶段时间相关指标，包括 gen, ref, values, adv, update_critic, update_actor 等
                 # TODO: implement actual tflpo and theoretical tflpo
                 n_gpus = self.resource_pool_manager.get_n_gpus()
-                metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus))
+                metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus)) # J：上报吞吐量指标，包括 total_num_tokens, time_per_step, throughput 等
                 # compute variance proxy metrics
-                gradient_norm = metrics.get("actor/grad_norm", None)
-                metrics.update(compute_variance_proxy_metrics(batch=batch, gradient_norm=gradient_norm))
+                gradient_norm = metrics.get("actor/grad_norm", None) # J：获取梯度范数指标
+                metrics.update(compute_variance_proxy_metrics(batch=batch, gradient_norm=gradient_norm)) # J：上报梯度方差监控诊断指标（refer to OTB paper）
                 # Note: mismatch metrics (KL, PPL, etc.) are collected at line 1179 after advantage computation
 
                 # Per-request spec decode metrics.
                 metrics.update(
-                    compute_spec_decode_metrics(
+                    compute_spec_decode_metrics( # J：计算 speculative decoding 指标，如 accept_rate, accept_length, etc
                         batch.non_tensor_batch.get("spec_num_draft_tokens", None),
                         batch.non_tensor_batch.get("spec_num_accepted_tokens", None),
                         batch.non_tensor_batch.get("spec_num_verify_steps", None),
@@ -1827,23 +1849,26 @@ class RayPPOTrainer:
                 )
 
                 # TODO: make a canonical logger that supports various backend
+                # J：核心，这一步将所有指标记录到后端，可以是文件、数据库、可视化工具等
                 logger.log(data=metrics, step=self.global_steps, backend=["file"]) # J：将指标记录到后端
 
                 progress_bar.update(1) # J：更新进度条
-                self.global_steps += 1
+                self.global_steps += 1 # J：更新全局步数
 
-                if is_last_step:
+                if is_last_step: # J：如果是最后一个 Step，阻塞等待所有异步保存真正完成，管理 dump executor 行器的关闭
                     if hasattr(self.actor_rollout_wg, "async_calls_finalize_fn_exec"):
                         self.actor_rollout_wg.async_calls_finalize_fn_exec(blocking=True) # J：训练结束前 阻塞 等待所有异步保存真正完成，避免进程退出时还有未落盘的 ckpt
-                    self._shutdown_dump_executor() # J：关闭 dump executor�行器，确保所有异步 dump 操作完成（正确执行完异步任务后退出）
+                    self._shutdown_dump_executor() # J：关闭 dump executor 行器，确保所有异步 dump 操作完成（正确执行完异步任务后退出）
                     pprint(f"Final validation metrics: {last_val_metrics}")
                     progress_bar.close()
                     return
 
                 # this is experimental and may be changed/removed in the future
                 # in favor of a general-purpose data buffer pool
-                if hasattr(self.train_dataset, "on_batch_end"):
+                if hasattr(self.train_dataset, "on_batch_end"): # J：只有当 self.train_dataset 实现了 on_batch_end 方法时才调用
                     # The dataset may be changed after each training batch
+                    # J：把当前训练完的 batch 传回 dataset，让 dataset 有机会 根据上一轮训练结果动态更新自身
+                    # J：可能场景如：基于上一轮训练反馈调整下一批数据（比如课程学习中根据当前分数调整下一批数据难度？）
                     self.train_dataset.on_batch_end(batch=batch)
 
         # Ensure dump executor is shut down when training loop ends without reaching is_last_step

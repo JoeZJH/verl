@@ -112,7 +112,7 @@ ACTOR=(
     +actor_rollout_ref.actor.megatron.override_transformer_config.gradient_accumulation_fusion=True
     +actor_rollout_ref.actor.megatron.override_transformer_config.moe_permute_fusion=True
     # Use aux_loss and z_loss to mitigate expert load imbalance when training MoE models
-    +actor_rollout_ref.actor.megatron.override_transformer_config.moe_aux_loss_coeff=0.01
+    +actor_rollout_ref.actor.megatron.override_transformer_config.moe_aux_loss_coeff=0.01 # J：类似 override_transformer_config 的配置都是用于重写 config_converter.py 中 从 hf_config 中提取的默认值（这个参数是 MoE 模型的 aux_loss 系数）
     +actor_rollout_ref.actor.megatron.override_transformer_config.moe_z_loss_coeff=0.001
 )
 

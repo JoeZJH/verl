@@ -45,7 +45,7 @@ def assign_non_tensor_data(tensor_dict: TensorDict, key, val):
     tensor_dict[key] = NonTensorData(val)
 
 
-def assign_non_tensor_stack(tensor_dict: TensorDict, key, val: list):
+def assign_non_tensor_stack(tensor_dict: TensorDict, key, val: list): # J：将非 Tensor 数据赋值给 TensorDict，key 和 val 是 kwargs 中的键值对
     """Assign a list with potentially nested structures (lists, dicts, etc.) to TensorDict.
 
     This function handles complex nested data structures like:
@@ -73,7 +73,7 @@ def assign_non_tensor_stack(tensor_dict: TensorDict, key, val: list):
     tensor_dict[key] = NonTensorStack.from_list([NonTensorData(item) for item in val])
 
 
-def assign_non_tensor(tensor_dict: TensorDict, **kwargs):
+def assign_non_tensor(tensor_dict: TensorDict, **kwargs): # J：将非 Tensor 数据赋值给 TensorDict，key 和 val 是 kwargs 中的键值对
     """Assign non-tensor data to a TensorDict.
 
     Automatically detects if the value is a list with nested structures and uses
@@ -96,14 +96,14 @@ def assign_non_tensor(tensor_dict: TensorDict, **kwargs):
     """
     assert isinstance(tensor_dict, TensorDict), "input dict must be a TensorDict"
     for key, val in kwargs.items():
-        if isinstance(val, (NonTensorData | NonTensorStack)):
+        if isinstance(val, (NonTensorData | NonTensorStack)): # J：如果 val 是 NonTensorData 或 NonTensorStack 类型
             tensor_dict[key] = val
-        elif isinstance(val, list):
+        elif isinstance(val, list): # J：如果 val 是 list 类型, 则使用 assign_non_tensor_stack 函数赋值给 TensorDict
             # For lists, use NonTensorStack
             assign_non_tensor_stack(tensor_dict=tensor_dict, key=key, val=val)
         else:
             # For non-list values, use NonTensorData
-            assign_non_tensor_data(tensor_dict=tensor_dict, key=key, val=val)
+            assign_non_tensor_data(tensor_dict=tensor_dict, key=key, val=val) # J：将非 Tensor 数据赋值给 TensorDict
     return tensor_dict
 
 
@@ -600,7 +600,7 @@ def make_iterator(tensordict: TensorDict, mini_batch_size, epochs, seed=None, da
 
     idx_lst = torch.arange(tensordict.shape[0])
 
-    train_dataloader = DataLoader(
+    train_dataloader = DataLoader( # J：注意，这里传入的参数是 mini_batch_size
         dataset=idx_lst, batch_size=mini_batch_size, collate_fn=lambda x: x, generator=generator, **dataloader_kwargs
     )
 

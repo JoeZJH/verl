@@ -48,7 +48,7 @@ async def _read_async_response(resp: aiohttp.ClientResponse) -> dict[str, Any]:
         }
 
 
-def launch_router_process(
+def launch_router_process( # J：启动路由进程，用于处理请求
     worker_urls: list[str],
 ):
     router_ip = ray.util.get_node_ip_address().strip("[]")
@@ -58,7 +58,7 @@ def launch_router_process(
     )
 
     router_process = multiprocessing.Process(
-        target=run_router,
+        target=run_router, # J：启动路由进程，用于处理请求
         args=(
             router_ip,
             router_port,
@@ -66,20 +66,20 @@ def launch_router_process(
         ),
     )
     router_process.daemon = True
-    router_process.start()
+    router_process.start() # J：启动路由进程，用于处理请求
     time.sleep(3)
     assert router_process.is_alive()
 
     logger.info(f"Router is running on {router_address}")
-    return router_address, router_process
+    return router_address, router_process # J：返回路由地址和路由进程，用于其他节点调用
 
 
-def run_router(router_ip: str, router_port: int, worker_urls: list[str]):
-    router = NaiveRouter(worker_urls=worker_urls, verbose=False)
+def run_router(router_ip: str, router_port: int, worker_urls: list[str]): # J：启动路由进程，用于处理请求
+    router = NaiveRouter(worker_urls=worker_urls, verbose=False) # J：创建负载均衡路由实例，用于处理请求
     uvicorn.run(router.app, host=router_ip, port=router_port, log_level="warning")
 
 
-class NaiveRouter:
+class NaiveRouter: # J：负载均衡路由类，用于处理请求
     def __init__(
         self,
         worker_urls: list[str],
@@ -174,10 +174,10 @@ class NaiveRouter:
 
     def _select_worker(self) -> str:
         """Select the least-loaded worker (simple round-robin by request count)."""
-        url = min(self.request_counts, key=self.request_counts.get)
-        self.request_counts[url] += 1
-        return url
+        url = min(self.request_counts, key=self.request_counts.get) # J：选择负载最小的 worker
+        self.request_counts[url] += 1 # J：增加该 worker 的请求计数
+        return url # J：返回选择的 worker 地址
 
     def _release_worker(self, url: str) -> None:
         """Mark worker as free after request completes."""
-        self.request_counts[url] = max(0, self.request_counts[url] - 1)
+        self.request_counts[url] = max(0, self.request_counts[url] - 1) # J：减少该 worker 的请求计数，确保不小于 0

@@ -73,7 +73,7 @@ class DAPORewardManager(RewardManagerBase):
             else {}
         )
         if self.is_async_reward_score:
-            result = await self.compute_score(
+            result = await self.compute_score( # J：对于 compute_score 是异步函数的情况，直接 await
                 data_source=data_source,
                 solution_str=response_str,
                 ground_truth=ground_truth,
@@ -81,7 +81,11 @@ class DAPORewardManager(RewardManagerBase):
                 **extra_reward_kwargs,
             )
         else:
-            result = await self.loop.run_in_executor(
+            result = await self.loop.run_in_executor( # J: 对于 compute_score 是同步函数的情况，添加到线程池中执行
+                # J：batch 内的多个样本是通过 asyncio.gather 并发 调度的
+                # J：如果同步的 compute_score 直接调用（不丢线程池），它就会 阻塞整个事件循环 ，把并发退化成串行， gather 完全失去意义
+                # J：所以必须用 run_in_executor 让同步函数在另一个线程里跑，事件循环才能继续推进其他 task
+                # J：这里的含义是：将任务提交到 loop 中，同时阻塞等待，但是将执行权交出去，直到执行完成才返回（比直接调用好，因为直接调用时的等待期间不会将执行权交出去）
                 None,
                 lambda: self.compute_score(
                     data_source=data_source,

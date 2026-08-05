@@ -109,7 +109,7 @@ class BaseEngine:
         """
         raise NotImplementedError
 
-    def train_batch(self, data: TensorDict, loss_function: Callable) -> Any:
+    def train_batch(self, data: TensorDict, loss_function: Callable) -> Any: # J：训练一个 batch 数据，根据 loss_function 来更新参数
         """
         Perform a training step on a batch of data.
 
@@ -120,17 +120,17 @@ class BaseEngine:
         Returns:
             dict[str, torch.Tensor]: A dictionary containing the aggregated training metrics for the batch.
         """
-        maybe_fix_3d_position_ids(data)
+        maybe_fix_3d_position_ids(data) # J：可能需要针对 3D position 进行修复（待确认）
 
-        self.optimizer_zero_grad()
-        outputs = self.forward_backward_batch(data, loss_function, forward_only=False)
-        grad_norm = self.optimizer_step()
+        self.optimizer_zero_grad() # J：训练梯度置 0
+        outputs = self.forward_backward_batch(data, loss_function, forward_only=False) # J：完成 forward + backward 过程，传入 loss_function 用于计算 loss
+        grad_norm = self.optimizer_step() # J：执行参数更新，返回 grad_norm，给上报使用
         if self.is_mp_src_rank_with_outputs():
             assert "grad_norm" not in outputs["metrics"]
-            outputs["metrics"]["grad_norm"] = grad_norm
-        return outputs
+            outputs["metrics"]["grad_norm"] = grad_norm # J：添加 grad_norm 到上报指标中
+        return outputs # J：outputs 中主要包含训练指标等
 
-    def infer_batch(self, data: TensorDict, loss_function: Optional[Callable] = None) -> Any:
+    def infer_batch(self, data: TensorDict, loss_function: Optional[Callable] = None) -> Any: # J：完成一次前向推理
         """
         Perform inference on a batch of data.
 
@@ -144,7 +144,7 @@ class BaseEngine:
         maybe_fix_3d_position_ids(data)
 
         with torch.no_grad():
-            outputs = self.forward_backward_batch(data, loss_function, forward_only=True)
+            outputs = self.forward_backward_batch(data, loss_function, forward_only=True) # J：仅执行前向推理，可以不计算 loss（视 loss_function 的情况而定）
         return outputs
 
     def get_per_tensor_param(self) -> tuple[Generator[tuple[str, torch.Tensor], None, None], Optional[dict]]:

@@ -220,8 +220,7 @@ def clip_by_value(x: torch.Tensor, tensor_min: torch.Tensor, tensor_max: torch.T
     clipped = torch.max(torch.min(x, tensor_max), tensor_min)
     return clipped
 
-
-def entropy_from_logits(logits: torch.Tensor) -> torch.Tensor:
+def entropy_from_logits(logits: torch.Tensor) -> torch.Tensor: # J：从 logits 中计算熵（使用了变换后的熵计算公式）
     """Calculate Shannon entropy from unnormalized logits.
 
     Computes H(p) = -sum(p * log(p)) using the numerically stable formula:
@@ -233,6 +232,7 @@ def entropy_from_logits(logits: torch.Tensor) -> torch.Tensor:
     Returns:
         torch.Tensor: Entropy values with shape (...,), one per distribution.
     """
+    # J: 这里的计算方式是与熵的原始定义一致的，即 H(p) = -sum(p * log(p)) = logsumexp(logits) - sum(softmax(logits) * logits)，其中 p 是分布 p 的概率密度函数
     pd = torch.nn.functional.softmax(logits, dim=-1)
     entropy = torch.logsumexp(logits, dim=-1) - torch.sum(pd * logits, dim=-1)
     return entropy

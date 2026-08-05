@@ -157,7 +157,7 @@ class RolloutReplica(ABC):
         await self.launch_servers()
 
     # TODO(sgm): this should be the default solution, but need to make the RolloutMode more clear.
-    async def init_colocated(self, resource_pool: RayResourcePool):
+    async def init_colocated(self, resource_pool: RayResourcePool): # J：初始化 colocated rollout server
         """Init colocated rollout server, rollout engine and hybrid engine colocated in same ray placement group
         but in separate processes.
 
@@ -225,7 +225,7 @@ class RolloutReplica(ABC):
         self.workers = worker_group.workers
         await self.launch_servers()
 
-    def get_ray_class_with_init_args(self) -> RayClassWithInitArgs:
+    def get_ray_class_with_init_args(self) -> RayClassWithInitArgs: # J：获取 RayClassWithInitArgs 类对象，封装了 CheckpointEngineWorker
         """Get rollout worker actor class for colocated and standalone mode."""
         from verl.checkpoint_engine.base import CheckpointEngineWorker
 
@@ -299,10 +299,10 @@ class RolloutReplica(ABC):
         await asyncio.gather(*[server.stop_profile.remote() for server in self.servers])
 
 
-class RolloutReplicaRegistry:
+class RolloutReplicaRegistry: # J：管理 rollout replica 类的注册表
     """Factory for managing rollout replica implementations."""
 
-    _registry: dict[str, Callable[[], type[RolloutReplica]]] = {}
+    _registry: dict[str, Callable[[], type[RolloutReplica]]] = {} # J：注册 rollout replica 类的映射表，包括 vllm、sglang, trtllm 等
 
     @classmethod
     def register(cls, name: str, loader: Callable[[], type[RolloutReplica]]) -> None:
@@ -310,7 +310,7 @@ class RolloutReplicaRegistry:
         cls._registry[name] = loader
 
     @classmethod
-    def get(cls, name: str) -> type[RolloutReplica]:
+    def get(cls, name: str) -> type[RolloutReplica]: # J：根据 rollout 模式名称，返回对应的 RolloutReplica 类对象
         """Get a rollout replica class by name."""
         if name not in cls._registry:
             raise ValueError(f"Unknown rollout mode: {name}. Available: {list(cls._registry.keys())}")
@@ -380,7 +380,7 @@ RolloutReplicaRegistry.register("sglang", _load_sglang)
 RolloutReplicaRegistry.register("trtllm", _load_trtllm)
 
 
-def get_rollout_replica_class(rollout: str, disaggregation_enabled: bool = False) -> type[RolloutReplica]:
+def get_rollout_replica_class(rollout: str, disaggregation_enabled: bool = False) -> type[RolloutReplica]: # J：根据 rollout 模式和是否开启 disaggregation，返回对应的 RolloutReplica 类对象
     """Resolve a replica class by backend name.
 
     PD-disaggregated SGLang reuses the ``sglang`` backend name; the dispatch
@@ -390,7 +390,7 @@ def get_rollout_replica_class(rollout: str, disaggregation_enabled: bool = False
     ``RolloutConfig.__post_init__`` blocks the flag for non-SGLang names, so
     this function only has to handle the SGLang fork.
     """
-    if disaggregation_enabled:
+    if disaggregation_enabled: # J: 是否开启 Prefill-Decode 解耦（PD disaggregation），即 预填充-解码分离部署
         if rollout != "sglang":
             raise NotImplementedError(f"PD disaggregation is only supported with rollout='sglang'; got {rollout!r}.")
         # _load_sglang side-effect: installs vllm mocks needed by SGLangPDReplica's
@@ -399,4 +399,4 @@ def get_rollout_replica_class(rollout: str, disaggregation_enabled: bool = False
         from verl.workers.rollout.sglang_rollout.sglang_pd_replica import SGLangPDReplica
 
         return SGLangPDReplica
-    return RolloutReplicaRegistry.get(rollout)
+    return RolloutReplicaRegistry.get(rollout) # J：根据 rollout 模式名称，返回对应的 RolloutReplica 类对象, 例如 vllm、sglang, trtllm 等

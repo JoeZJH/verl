@@ -239,7 +239,7 @@ def compute_score(data_source, solution_str, ground_truth, extra_info, step=0):
 
     score = fomrat_score + correctness_score
 
-    result = {
+    result = { # J：这里跟 gdpo_reward_keys = '["accuracy_reward", "format_reward"]' 保持一致
         "score": score,
         "format_reward": fomrat_score,
         "accuracy_reward": correctness_score,

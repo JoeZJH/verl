@@ -28,7 +28,7 @@ _trace_enabled: ContextVar[bool] = ContextVar("_trace_enabled", default=True)
 _trace_attributes: ContextVar[dict | None] = ContextVar("_trace_attributes", default=None)
 
 
-class RolloutTraceConfig:
+class RolloutTraceConfig: # J：RolloutTraceConfig 类用于配置 rollout trace 的参数
     """Configuration for rollout tracing with various backends.
 
     Singleton configuration class for managing rollout trace settings across different
@@ -130,7 +130,7 @@ class RolloutTraceConfig:
 
 
 @contextlib.contextmanager
-def rollout_trace_attr(
+def rollout_trace_attr( # J: 追踪 rollout 的属性
     sample_index=None, step=None, rollout_n=None, name="rollout_trace", validate=False, trace: bool = True
 ):
     """A context manager to add attributes to a trace for the configured backend.

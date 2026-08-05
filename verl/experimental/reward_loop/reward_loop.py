@@ -90,7 +90,8 @@ def migrate_legacy_reward_impl(config):
     return config
 
 
-class RewardLoopWorker:
+class RewardLoopWorker: # J: Reward 处理的 worker，负责计算一个 batch 数据的奖励分数
+    # J：关系：RewardLoopManager 持有多个 RewardLoopWorker（Ray Worker），RewardLoopWorker 包含一个 RewardManager, RewardManager 负责真实的 reward 计算过程
     """
     RewardLoopWork can tackle reward computation:
     (1) rule-based reward computation
@@ -103,7 +104,7 @@ class RewardLoopWorker:
     - if user-customized reward function is not provided:
         -> rm is not enabled: use default rule-based reward function
         -> rm is disrm: compute reward score using disrm
-        -> rm is genrm: raise error (user-costomized reward func must be provided)
+        -> rm is genrm: raise error (user-costomized reward func must be provided) # J：GenRM 必须配置 custom_reward_function （因为要解析生成的判断文本）
     """
 
     def __init__(self, config: DictConfig, reward_router_address: str = None):
@@ -114,10 +115,10 @@ class RewardLoopWorker:
         """
         self.config = config
         self.reward_router_address = reward_router_address
-        self._init_reward_fn()
+        self._init_reward_fn() # J: 初始化 RewardManager，回填到 self.reward_manager 中
         self.loop = get_event_loop()
 
-    def _init_reward_fn(self):
+    def _init_reward_fn(self): # J：初始化 RewardManager 对象
         input_tokenizer_path = self.config.actor_rollout_ref.model.tokenizer_path
         if input_tokenizer_path is None:
             input_tokenizer_path = self.config.actor_rollout_ref.model.path
@@ -125,31 +126,35 @@ class RewardLoopWorker:
         self.input_tokenizer = hf_tokenizer(input_tokenizer_local_path, trust_remote_code=True)
         self.reward_model_tokenizer = None
         if self.config.reward.reward_model.enable:
-            reward_model_tokenizer_local_path = copy_to_local(self.config.reward.reward_model.model_path)
+            # J：加载 reward model 的 tokenizer
+            reward_model_tokenizer_local_path = copy_to_local(self.config.reward.reward_model.model_path) # J：复制文件到本地路径，并返回本地路径
             self.reward_model_tokenizer = hf_tokenizer(reward_model_tokenizer_local_path, trust_remote_code=True)
 
-        self.reward_manager = load_reward_manager(
+        self.reward_manager = load_reward_manager( # J：加载 RewardManager 类对象，reward_manager 是真实执行奖励计算的对象
+            # J：关系：RewardLoopManager 持有多个 RewardLoopWorker（Ray Worker），RewardLoopWorker 包含一个 RewardManager, RewardManager 负责真实的 reward 计算过程
             self.config,
             self.input_tokenizer,
             reward_router_address=self.reward_router_address,
             reward_model_tokenizer=self.reward_model_tokenizer,
         )
 
-    async def compute_score_batch(self, data: DataProto) -> list[dict]:
+    async def compute_score_batch(self, data: DataProto) -> list[dict]: # J：计算一个 batch 的奖励分数
         tasks = []
         for i in range(len(data)):
             tasks.append(asyncio.create_task(self.compute_score(data[i : i + 1])))
         outputs = await asyncio.gather(*tasks)
         return outputs
 
-    async def compute_score(self, data: DataProto) -> dict:
-        if self.config.reward.custom_reward_function.path is not None:
+    async def compute_score(self, data: DataProto) -> dict: # J：计算奖励分数，判别式 RM 是特殊函数调用，其他情况（包括 RLVR 和 GenRM 场景都是 reward_manager 负责）
+        if self.config.reward.custom_reward_function.path is not None: # J：自定义配置的奖励打分函数
             # directly use user-customized reward function
-            return await self.reward_manager.run_single(data)
+            return await self.reward_manager.run_single(data) # J：执行一次奖励打分
         else:
             if self.config.reward.reward_model.enable:
                 # we assume the rm is disrm
                 # genrm must set custom_reward_function
+                # J: 这里 disrm 是 Discriminative Reward Model 的含义，说明是调用判别式奖励模型计算奖励分数，与这个对应的是可以考虑使用 GenRM
+                # J: 类文档 reward_loop.py 也写明： GenRM 必须配置 custom_reward_function （因为要解析生成的判断文本），所以代码里注释 # we assume the rm is disrm，只要走到 compute_score_disrm 这条分支，就假定它是 DisRM
                 return await self.compute_score_disrm(data[-1:])
             else:
                 return await self.reward_manager.run_single(data)
@@ -228,19 +233,20 @@ class RewardLoopWorker:
 
         return rm_prompt
 
-    async def compute_score_disrm(self, data: DataProto) -> dict:
+    async def compute_score_disrm(self, data: DataProto) -> dict: # J：判别式 RM 的奖励分数计算
         disrm_prompt = await self._preprocess_reward_inputs(data)
         engine_name = self.config.reward.reward_model.rollout.name
         model_name = self.config.reward.reward_model.model_path
-        if engine_name == "vllm":
+        # J：区分不同推理引擎得到结果
+        if engine_name == "vllm": # J：vllm 引擎
             payloads = {
                 "model": model_name,
                 "input": disrm_prompt,
                 "use_activation": False,
             }
-            output = await self._post_request(payloads, "classify")
+            output = await self._post_request(payloads, "classify") # J：真实调用函数
             rm_score = output["data"][-1]["probs"][-1]
-        elif engine_name == "sglang":
+        elif engine_name == "sglang": # J: sglang 引擎
             payloads = {
                 "model": model_name,
                 "input": disrm_prompt,
@@ -270,7 +276,7 @@ class RewardLoopWorker:
         return {"reward_score": rm_score}
 
 
-class RewardLoopManager:
+class RewardLoopManager: # J：RewardLoopManager 类定义，RewardLoopManager 与主流程交互，包含了 RewardManager 类
     """
     RewardLoopManager run in single controller.
     This class will create reward loop workers and manage them.
@@ -278,16 +284,17 @@ class RewardLoopManager:
 
     def __init__(self, config: DictConfig, rm_resource_pool: RayResourcePool = None):
         self.config = config
-        if self.config.reward.reward_model.enable:
+        if self.config.reward.reward_model.enable: # J：如果打开 reward_model 则，需要创建 RewardModelManager 对象
+            # J：目前都采用将 reward model 放到一个节点上，然后打开 ip 服务，其他节点通过 ip 调用 的方式实现（基于 vllm 或者 sglang 引擎）
             self.reward_model_manager = RewardModelManager(config.reward.reward_model, rm_resource_pool) # J：reward_model_manager 是 reward model 的管理类，负责初始化 reward model 的 replica 和路由
-            self.reward_router_address = self.reward_model_manager.get_router_address()
+            self.reward_router_address = self.reward_model_manager.get_router_address() # J：reward_router_address 是 reward model 的路由地址，用于其他节点调用
         else:
             self.reward_model_manager = None
             self.reward_router_address = None
 
-        self.reward_loop_workers_class = ray.remote(RewardLoopWorker)
-        self.reward_manager_cls = resolve_reward_manager_cls(config)
-        self._init_reward_loop_workers()
+        self.reward_loop_workers_class = ray.remote(RewardLoopWorker) # J：注册 RewardLoopWorker 类为远程
+        self.reward_manager_cls = resolve_reward_manager_cls(config) # J：根据配置文件解析 RewardManager 类，这个类在 RewardLoopManager 中不会初始化，仅用于调用一些静态类函数
+        self._init_reward_loop_workers() # J：调用 reward_loop_workers_class 类创建对象并存储到  self.reward_loop_workers 中
 
     @property
     def reward_loop_worker_handles(self) -> list[ActorHandle]:
@@ -301,8 +308,8 @@ class RewardLoopManager:
             return self.reward_loop_workers
         return None
 
-    def _init_reward_loop_workers(self):
-        self.reward_loop_workers = []
+    def _init_reward_loop_workers(self): # J：初始化 reward loop worker
+        self.reward_loop_workers = [] # J：可以有多个 reward loop worker
         num_workers = self.config.reward.num_workers
         node_ids = [node["NodeID"] for node in ray.nodes() if node["Alive"] and node["Resources"].get("CPU", 0) > 0]
 
@@ -317,7 +324,7 @@ class RewardLoopManager:
                         node_id=node_id,
                         soft=True,
                     ),
-                ).remote(self.config, self.reward_router_address)
+                ).remote(self.config, self.reward_router_address) # J：创建 reward loop worker 并分配到节点上
             )
 
     def compute_rm_score(self, data: DataProto) -> DataProto: # J：计算 reward score 并返回包含 rm_scores 张量和 reward_extra_info 字段的 DataProto 对象，注：仅每个样本的最后一个 Response token 被赋值，其余 Token 都是 0
@@ -343,6 +350,7 @@ class RewardLoopManager:
         non_tensor_batch = {}
         for key in reward_extra_keys:
             # J：将每个 reward的 reward_extra_info 字段转换为 numpy 数组，并存储在 non_tensor_batch 中
+            # J：比如在 gdpo 中，reward_extra_info 包含 accuracy_reward 和 format_reward 两个字段，这里需要把对应的奖励记录下来
             non_tensor_batch[key] = np.array([info[key] for info in reward_extra_infos])
 
         if self.reward_model_manager is not None:

@@ -16,12 +16,12 @@
 from verl.utils.import_utils import deprecated
 
 
-def default_compute_score(
+def default_compute_score( # J：默认的奖励 score 计算函数，根据传入的数据类型等完成 score 等计算
     data_source,
     solution_str,
     ground_truth,
     extra_info=None,
-    sandbox_fusion_url=None,
+    sandbox_fusion_url=None, # J：代码类别的函数验证需要调用沙盒，此时需要配置 url
     concurrent_semaphore=None,
     memory_limit_mb=None,
     **kwargs,
@@ -71,7 +71,7 @@ def default_compute_score(
         from . import prime_math
 
         res = prime_math.compute_score(solution_str, ground_truth)
-    elif data_source in ["codecontests", "apps", "codeforces", "taco"]:
+    elif data_source in ["codecontests", "apps", "codeforces", "taco"]: # J：这些代码类别是需要调用沙盒环境的
         # Use the passed sandbox_fusion_url if available
         if sandbox_fusion_url:
             from . import sandbox_fusion
@@ -132,9 +132,9 @@ def _default_compute_score(
     )
 
 
-def get_default_compute_score(reward_name: str | None):
+def get_default_compute_score(reward_name: str | None): # J：返回默认的 reward 计算函数
     """Get the default compute_score function based on the reward manager type."""
-    return default_compute_score
+    return default_compute_score # J：与 reward_name 无关，直接返回默认函数 fn 对象
 
 
 __all__ = ["default_compute_score"]

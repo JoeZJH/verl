@@ -776,7 +776,7 @@ def compute_is_metrics(
     return metrics
 
 
-def compute_rollout_correction_and_rejection_mask(
+def compute_rollout_correction_and_rejection_mask( # J：计算 IS 和 RS，返回 IS 和 RS 的结果，以及一些训推不一致的监控指标
     old_log_prob: torch.Tensor,
     rollout_log_prob: torch.Tensor,
     response_mask: torch.Tensor,
@@ -845,7 +845,7 @@ def compute_rollout_correction_and_rejection_mask(
     # Step 2: Compute IS weights (if enabled)
     rollout_is_weights: Optional[torch.Tensor] = None
     if rollout_is is not None and rollout_is_threshold is not None:
-        rollout_is_weights, is_metrics = compute_rollout_correction_weights(
+        rollout_is_weights, is_metrics = compute_rollout_correction_weights( # J：计算 IS
             log_ratio=log_ratio,
             response_mask=response_mask,
             rollout_is=rollout_is,
@@ -862,7 +862,7 @@ def compute_rollout_correction_and_rejection_mask(
                 "rollout_rs_threshold must be explicitly provided when rollout_rs is enabled. "
                 "Set rollout_rs_threshold to the desired threshold value."
             )
-        modified_response_mask, rs_metrics = compute_rollout_rejection_mask(
+        modified_response_mask, rs_metrics = compute_rollout_rejection_mask( # J：计算 RS
             log_ratio=log_ratio,
             response_mask=response_mask,
             rollout_rs=rollout_rs,
@@ -871,7 +871,7 @@ def compute_rollout_correction_and_rejection_mask(
         metrics.update(rs_metrics)
 
     # Step 4: Compute off-policy metrics (KL, PPL, χ², etc.)
-    offpolicy_metrics: dict[str, float] = compute_offpolicy_metrics(
+    offpolicy_metrics: dict[str, float] = compute_offpolicy_metrics( # J：计算一些用来判断 Rollout-Training Off-policy 的程度指标
         old_log_prob=old_log_prob,
         rollout_log_prob=rollout_log_prob,
         response_mask=response_mask,
@@ -891,7 +891,7 @@ def compute_rollout_correction_and_rejection_mask(
     if rollout_is_weights is not None:
         rollout_is_weights_proto = DataProto.from_dict(tensors={"rollout_is_weights": rollout_is_weights})
 
-    return rollout_is_weights_proto, modified_response_mask, metrics_scalar
+    return rollout_is_weights_proto, modified_response_mask, metrics_scalar # J：返回 IS 和 RS 的结果，metrics_scalar 是一个字典，包含训推不一致监控指标
 
 
 def compute_offpolicy_metrics(
@@ -1003,7 +1003,7 @@ def compute_offpolicy_metrics(
     return metrics
 
 
-def compute_rollout_correction_and_add_to_batch(
+def compute_rollout_correction_and_add_to_batch( # J：核心函数，用于计算训推不一致相关的指标
     batch: DataProto, rollout_corr_config: RolloutCorrectionConfig
 ) -> tuple[DataProto, dict]:
     """Compute rollout correction weights and apply rejection sampling.
@@ -1032,14 +1032,15 @@ def compute_rollout_correction_and_add_to_batch(
         The implementation is copied from szrlee <szrlee@gmail.com>.
     """
     # Get new API parameters directly from config
-    rollout_is = rollout_corr_config.get("rollout_is", None)
+    rollout_is = rollout_corr_config.get("rollout_is", None) # J：可选 "token" or "sequence"
     rollout_is_threshold = rollout_corr_config.get("rollout_is_threshold", 2.0)
     rollout_is_batch_normalize = rollout_corr_config.get("rollout_is_batch_normalize", False)
-    rollout_rs = rollout_corr_config.get("rollout_rs", None)
+    rollout_rs = rollout_corr_config.get("rollout_rs", None) # J：类似 "token_k1" 或 "token_k1,seq_sum_k3" 等
     rollout_rs_threshold = rollout_corr_config.get("rollout_rs_threshold", None)
 
     # Compute IS weights and get modified response_mask
-    rollout_is_weights, modified_response_mask, rollout_corr_metrics = compute_rollout_correction_and_rejection_mask(
+    # J：rollout_corr_metrics 是一个字典，包含训推不一致的监控指标
+    rollout_is_weights, modified_response_mask, rollout_corr_metrics = compute_rollout_correction_and_rejection_mask( # J：计算 IS 和 RS 的结果，以及一些训推不一致的监控指标
         old_log_prob=batch.batch["old_log_probs"],
         rollout_log_prob=batch.batch["rollout_log_probs"],
         response_mask=batch.batch["response_mask"],
@@ -1051,13 +1052,13 @@ def compute_rollout_correction_and_add_to_batch(
     )
 
     # ALWAYS update response_mask with rejection applied
-    batch.batch["response_mask"] = modified_response_mask
+    batch.batch["response_mask"] = modified_response_mask # J：RS 的效果，绑定到 response_mask，不符合规范的就直接删除了
 
     # Add IS weights to batch if computed
     if rollout_is_weights is not None:
         batch = batch.union(rollout_is_weights)
 
-    return batch, rollout_corr_metrics
+    return batch, rollout_corr_metrics # J：rollout_corr_metrics 是一个字典，包含训推不一致的监控指标
 
 
 def compute_rollout_corr_metrics_from_logprobs(

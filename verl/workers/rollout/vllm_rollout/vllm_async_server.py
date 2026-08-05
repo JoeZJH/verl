@@ -357,6 +357,7 @@ class vLLMHttpServer:
         if self.config.enable_rollout_routing_replay:
             args.update({"enable_return_routed_experts": True})
 
+        # J：model_config.local_path 是加载模型的路径
         server_args = ["serve", self.model_config.local_path] + build_cli_args_from_config(args)
 
         if self.replica_rank == 0:
@@ -371,14 +372,14 @@ class vLLMHttpServer:
             for cmd in new_cmds:
                 cmd.subparser_init(subparsers).set_defaults(dispatch_function=cmd.cmd)
                 cmds[cmd.name] = cmd
-        server_args = parser.parse_args(args=server_args)
+        server_args = parser.parse_args(args=server_args) # J：server_args 中包含了模型路径/模型名等信息
         server_args.model = server_args.model_tag
         if server_args.subparser in cmds:
             cmds[server_args.subparser].validate(server_args)
 
         # 3. launch server
         if self.node_rank == 0:
-            await self.run_server(server_args)
+            await self.run_server(server_args) # J：server_args 中包含模型路径/模型名等信息
         else:
             await self.run_headless(server_args)
 

@@ -54,7 +54,7 @@ def sft_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
     return loss, {}
 
 
-def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None):
+def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None): # J: Actor 的 loss_fn
     """Computes ppo loss from model output (log_prob, entropy, values, etc. ) and old_log_probs from data."""
     log_prob = no_padding_2_padding(model_output["log_probs"], data)
     entropy = model_output.get("entropy", None)
@@ -84,7 +84,7 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
 
     # select fields and convert to padded tensor
     fields = ["response_mask", "old_log_probs", "advantages"]
-    if "rollout_is_weights" in data:
+    if "rollout_is_weights" in data: # J：从 data 中 抽取 "rollout_is_weights" 字段，用于后续传入 loss_fn 修正训推问题
         fields.append("rollout_is_weights")
     if "ref_log_prob" in data:
         fields.append("ref_log_prob")
@@ -94,21 +94,22 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
     # compute policy loss
     old_log_prob = data["old_log_probs"]
     advantages = data["advantages"]
-    rollout_is_weights = data.get("rollout_is_weights", None)
+    rollout_is_weights = data.get("rollout_is_weights", None) # J：可能没有计算，此时设置为 None
 
     loss_agg_mode = config.loss_agg_mode
 
-    loss_mode = config.policy_loss.get("loss_mode", "vanilla")
+    # J：config.policy_loss 是一个 PolicyLossConfig 对象
+    loss_mode = config.policy_loss.get("loss_mode", "vanilla") # J: 获取 Policy Loss 模式，是，默认为 vanilla（还有 'gspo', 'cispo', 'sapo', 'kl-cov', 'gpg' 等）
 
-    policy_loss_fn = get_policy_loss_fn(loss_mode)
-    pg_loss, pg_metrics = policy_loss_fn(
+    policy_loss_fn = get_policy_loss_fn(loss_mode) # J: 获取 Policy Loss 函数
+    pg_loss, pg_metrics = policy_loss_fn( # J: 计算 Policy Loss
         old_log_prob=old_log_prob,
         log_prob=log_prob,
-        advantages=advantages,
+        advantages=advantages, # J：注意，到这里时， Advantage 已经计算完成了
         response_mask=response_mask,
         loss_agg_mode=loss_agg_mode,
         config=config,
-        rollout_is_weights=rollout_is_weights,
+        rollout_is_weights=rollout_is_weights, # J：for 训推不一致修正
     )
 
     # AggregationType.MEAN for pg metrics: assumes policy_loss_fn normalizes by local_bsz/local_tokens
@@ -125,7 +126,7 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
             loss_mat=entropy, loss_mask=response_mask, loss_agg_mode=loss_agg_mode, **config.global_batch_info
         )
         entropy_coeff = config.entropy_coeff
-        policy_loss -= entropy_coeff * entropy_loss
+        policy_loss -= entropy_coeff * entropy_loss # J: 将 entropy_loss 并添加到 policy_loss 中
         metrics["actor/entropy_loss"] = Metric(value=entropy_loss, aggregation=metric_aggregation)
 
     # add kl loss
@@ -137,7 +138,7 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
             loss_mat=kld, loss_mask=response_mask, loss_agg_mode=config.loss_agg_mode, **config.global_batch_info
         )
 
-        policy_loss += kl_loss * config.kl_loss_coef
+        policy_loss += kl_loss * config.kl_loss_coef # J: 将 kl_loss 并添加到 policy_loss 中
         metrics["kl_loss"] = Metric(value=kl_loss, aggregation=metric_aggregation)
         metrics["kl_coef"] = config.kl_loss_coef
 
@@ -159,12 +160,12 @@ def value_loss(config: CriticConfig, model_output, data: TensorDict, dp_group=No
     vpreds = no_padding_2_padding(model_output["values"], data)  # (bsz, response_length)
 
     # select fields and convert to padded tensor
-    data = data.select("values", "returns", "response_mask").to_padded_tensor()
-    values = data["values"]
-    returns = data["returns"]
+    data = data.select("values", "returns", "response_mask").to_padded_tensor() # J：自动根据 batch 数据情况 pad 数据并返回，默认 pad 值为 0.0
+    values = data["values"] # J: 获取 values
+    returns = data["returns"] # J：获取 returns
     response_mask = data["response_mask"].to(bool)
 
-    vf_loss, vf_clipfrac = compute_value_loss(
+    vf_loss, vf_clipfrac = compute_value_loss( # J：Critic 的损失函数计算
         vpreds=vpreds,
         values=values,
         returns=returns,
@@ -175,7 +176,7 @@ def value_loss(config: CriticConfig, model_output, data: TensorDict, dp_group=No
 
     metrics = {}
 
-    metrics.update(
+    metrics.update( # J：添加对应的指标
         {
             "critic/vf_loss": vf_loss.detach().item(),
             "critic/vf_clipfrac": vf_clipfrac.detach().item(),
@@ -183,4 +184,4 @@ def value_loss(config: CriticConfig, model_output, data: TensorDict, dp_group=No
         }
     )
 
-    return vf_loss, metrics
+    return vf_loss, metrics # J：返回 vf_loss 和 指标结果

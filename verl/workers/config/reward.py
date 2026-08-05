@@ -29,7 +29,7 @@ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
 @dataclass
-class RewardManagerConfig(BaseConfig):
+class RewardManagerConfig(BaseConfig): # J：RewardManager 配置类
     """Configuration for reward manager.
 
         A reward manager defines the mechanism of computing rule-based reward and handling different reward sources.
@@ -44,8 +44,8 @@ class RewardManagerConfig(BaseConfig):
         module (ModuleConfig, optional): Optional configuration for the external module defining the reward manager,
     """
 
-    source: str = "register"
-    name: str = "naive"
+    source: str = "register" # J：RewardManager 来源，默认从注册表 中获取
+    name: str = "naive" # J：RewardManager 名称，默认使用注册为 naive 的类
     module: Optional[ModuleConfig] = field(default_factory=ModuleConfig)
 
     def __post_init__(self):

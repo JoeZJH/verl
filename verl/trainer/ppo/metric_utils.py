@@ -86,7 +86,7 @@ def _compute_response_info(batch: DataProto) -> dict[str, Any]:
     )
 
 
-def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> dict[str, Any]:
+def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> dict[str, Any]: # J：计算数据指标（奖励、损失、梯度范数等）
     """
     Computes various metrics from a batch of data for PPO training.
 
@@ -110,8 +110,8 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> dict[str,
             - prompt_length/mean, max, min, clip_ratio: Statistics about prompt lengths
             - num_turns/mean, max, min: Statistics about the number of multi-turn conversations
     """
-    sequence_score = batch.batch["token_level_scores"].sum(-1)
-    sequence_reward = batch.batch["token_level_rewards"].sum(-1)
+    sequence_score = batch.batch["token_level_scores"].sum(-1) # J：token 粒度 -> sequence 粒度的序列 score
+    sequence_reward = batch.batch["token_level_rewards"].sum(-1) # J：token 粒度 -> sequence 粒度的序列 reward
 
     advantages = batch.batch["advantages"]
     returns = batch.batch["returns"]
@@ -125,13 +125,14 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> dict[str,
     prompt_length = response_info["prompt_length"]
     response_length = response_info["response_length"]
 
-    aborted_mask = (response_length == 0).bool()
-    non_aborted_mask = ~aborted_mask
+    # J：TODO response_length 为 0 的样本来源：
+    aborted_mask = (response_length == 0).bool() # J: response_length 为 0 的样本判定为 aborted 样本
+    non_aborted_mask = ~aborted_mask # J: 非 aborted 样本的为 1，否则为 0，这里是 每个样本一个 mask（batch_size,）
 
     non_aborted_sequence_score = sequence_score[non_aborted_mask]
     non_aborted_sequence_reward = sequence_reward[non_aborted_mask]
 
-    if non_aborted_sequence_score.numel() > 0:
+    if non_aborted_sequence_score.numel() > 0: # J: 至少有一个非 aborted 样本
         score_mean = torch.mean(non_aborted_sequence_score).detach().item()
         score_max = torch.max(non_aborted_sequence_score).detach().item()
         score_min = torch.min(non_aborted_sequence_score).detach().item()
@@ -268,7 +269,7 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> dict[str,
     return metrics
 
 
-def compute_timing_metrics(batch: DataProto, timing_raw: dict[str, float]) -> dict[str, Any]:
+def compute_timing_metrics(batch: DataProto, timing_raw: dict[str, float]) -> dict[str, Any]: # J：上报各阶段时间相关指标，包括 gen, ref, values, adv, update_critic, update_actor 等
     """
     Computes timing metrics for different processing stages in PPO training.
 
@@ -310,7 +311,7 @@ def compute_timing_metrics(batch: DataProto, timing_raw: dict[str, float]) -> di
     }
 
 
-def compute_throughout_metrics(batch: DataProto, timing_raw: dict[str, float], n_gpus: int) -> dict[str, Any]:
+def compute_throughout_metrics(batch: DataProto, timing_raw: dict[str, float], n_gpus: int) -> dict[str, Any]: # J：上报吞吐量指标，包括 total_num_tokens, time_per_step, throughput 等
     """
     Computes throughput metrics for PPO training.
 
@@ -334,20 +335,22 @@ def compute_throughout_metrics(batch: DataProto, timing_raw: dict[str, float], n
         The throughput is calculated as total_tokens / (time * n_gpus) to normalize
         across different GPU counts.
     """
-    total_num_tokens = sum(batch.meta_info["global_token_num"])
-    time = timing_raw["step"]
+    total_num_tokens = sum(batch.meta_info["global_token_num"]) # J：抽取这一步的总 token 数
+    time = timing_raw["step"] # J：抽取这一步的耗时，单位为秒
     # estimated_flops, promised_flops = flops_function.estimate_flops(num_tokens, time)
     # f'Actual TFLOPs/s/GPU​': estimated_flops/(n_gpus),
     # f'Theoretical TFLOPs/s/GPU​': promised_flops,
     return {
-        "perf/total_num_tokens": total_num_tokens,
-        "perf/time_per_step": time,
-        "perf/throughput": total_num_tokens / (time * n_gpus),
+        "perf/total_num_tokens": total_num_tokens, # J：上报这一步的总 token 数
+        "perf/time_per_step": time, # J：上报这个 step 的耗时，单位为秒
+        "perf/throughput": total_num_tokens / (time * n_gpus), # J：上报吞吐量，单位为 tokens/s/GPU
     }
 
 
-def compute_variance_proxy_metrics(batch: DataProto, gradient_norm: float = None) -> dict[str, float]:
+def compute_variance_proxy_metrics(batch: DataProto, gradient_norm: float = None) -> dict[str, float]: # J：梯度方差监控诊断函数
     """
+    # J：参考论文：The Optimal Token Baseline: Variance Reduction for Long-Horizon LLM-RL （2602.07078，ICML 2026 regular accept）
+    # J：参考博客：[The Optimal Token Baseline](http://richardli.xyz/optimal-token-baseline/)
     Compute variance proxy metrics using the simplified expected squared norm approach.
 
     This metric provides a computationally efficient way to monitor gradient variance
@@ -365,6 +368,7 @@ def compute_variance_proxy_metrics(batch: DataProto, gradient_norm: float = None
 
     # Check if we have the necessary data (sum_pi_squared is required for W-score)
     if "sum_pi_squared" not in batch.batch or "old_log_probs" not in batch.batch or "advantages" not in batch.batch:
+        # J：需要 batch 中包含 sum_pi_squared, old_log_probs, advantages 才能计算相关指标
         return metrics
 
     # Compute W(τ) = Σ_t[1 - 2π_t(y_t) + Σπ²]
@@ -401,10 +405,13 @@ def compute_variance_proxy_metrics(batch: DataProto, gradient_norm: float = None
 
     # ====== PROXY 1: Signal Strength ||ḡ||² ======
     # The squared norm of the mean gradient (provided from training loop)
+    # J：proxy1_signal_strength 是信号强度 ：batch 平均梯度的平方范数（从训练循环的 actor/grad_norm 传入），代表"有用信号"的大小
     proxy1_signal_strength = gradient_norm**2 if gradient_norm is not None else None
 
     # ====== PROXY 2: Total Power E[||ĝ_τ||²] ======
     # Measures the average of squared gradient norms (Signal + Noise)
+    # J：proxy2_total_power 是总功率 ：单条轨迹梯度平方范数的平均，包含信号 + 噪声。off-policy 时为 E[ρ̄² × A² × W]
+    # J：直观理解：Proxy2 是总功率（信号+噪声），Proxy1 是信号，二者之差就是噪声，除以 N−1 得到均值梯度的方差估计。比值 Proxy1 / Proxy2 可看作"信噪比"
     if rollout_is_weights is not None:
         # Off-policy with IS correction applied: use clamped weights consistently with actual gradient computation
         rollout_is_weights_scalar = verl_F.masked_mean(rollout_is_weights, response_mask, axis=-1)
@@ -427,6 +434,7 @@ def compute_variance_proxy_metrics(batch: DataProto, gradient_norm: float = None
     # ====== PROXY 3: Pure Noise - Variance of Mean Vector ======
     # Requires ||ḡ||² from actual batch gradient
     # Formula: (1/(N-1)) × (Proxy2 - Proxy1)
+    # J：proxy3_pure_noise 是纯噪声 ：batch 均值梯度的方差估计，即"噪声"部分，负值被截断到 0（数值误差）
     proxy3_pure_noise = None
     if proxy1_signal_strength is not None:
         batch_size = advantages_scalar.shape[0]
@@ -438,13 +446,13 @@ def compute_variance_proxy_metrics(batch: DataProto, gradient_norm: float = None
             )
 
     # Decompose into components for analysis
-    expected_a_squared = (advantages_scalar**2).mean()
-    expected_w = w_values.mean()
+    expected_a_squared = (advantages_scalar**2).mean() # J：= E[A²] ：优势函数平方的期望，反映 advantage 的量级
+    expected_w = w_values.mean() # J：= E[W(τ)] ：score-norm proxy 的期望，反映策略分布的"不确定性/熵"；Token 越不确定，W 越大
 
     metrics.update(
         {
             # Proxy 1: Signal Strength ||ḡ||²
-            "variance_proxy/proxy1_signal_strength": (
+            "variance_proxy/proxy1_signal_strength": ( # J：信号强度 ：batch 平均梯度的平方范数（从训练循环的 actor/grad_norm 传入）。代表"有用信号"的大小
                 proxy1_signal_strength if proxy1_signal_strength is not None else 0.0
             ),
             # Proxy 2: Total Power E[||ĝ_τ||²]
@@ -452,8 +460,8 @@ def compute_variance_proxy_metrics(batch: DataProto, gradient_norm: float = None
             # Proxy 3: Pure Noise - Variance of Mean Vector
             "variance_proxy/proxy3_pure_noise": proxy3_pure_noise if proxy3_pure_noise is not None else 0.0,
             # Component metrics for debugging
-            "variance_proxy/expected_a_squared": expected_a_squared.detach().item(),
-            "variance_proxy/expected_w": expected_w.detach().item(),
+            "variance_proxy/expected_a_squared": expected_a_squared.detach().item(), # J：= E[A²] ：优势函数平方的期望，反映 advantage 的量级
+            "variance_proxy/expected_w": expected_w.detach().item(), # J：= E[W(τ)] ：score-norm proxy 的期望，反映策略分布的"不确定性/熵"；Token 越不确定，W 越大
         }
     )
 

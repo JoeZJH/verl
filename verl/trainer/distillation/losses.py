@@ -162,7 +162,7 @@ def compute_topk_loss(
     return outputs
 
 
-def distillation_ppo_loss(
+def distillation_ppo_loss( # J：蒸馏使用的 Loss
     config: ActorConfig,
     distillation_config: Optional[DistillationConfig],
     model_output: dict = None,
@@ -216,13 +216,13 @@ def distillation_ppo_loss(
     distillation_loss_coef = (
         distillation_loss_config.distillation_loss_coef if distillation_loss_config.use_task_rewards else 1.0
     )
-    policy_loss += distill_loss * distillation_loss_coef
+    policy_loss += distill_loss * distillation_loss_coef # J：蒸馏 Loss 的常规实现是 蒸馏 Loss + RL Actor Loss
     policy_metrics["distillation/loss"] = Metric(value=distill_loss, aggregation=AggregationType.SUM)
 
     return policy_loss, policy_metrics
 
 
-def distillation_loss(
+def distillation_loss( # J：蒸馏 Loss 的计算
     config: ActorConfig,
     distillation_config: DistillationConfig,
     model_output: dict,
