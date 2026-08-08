@@ -379,7 +379,7 @@ https://hydra.cc/docs/advanced/instantiate_objects/overview/
 _agent_loop_registry: dict[str, dict] = {}
 
 
-def register(agent_name: str): # J: 注册 agent_loop 类的装饰器
+def register(agent_name: str): # J: 注册 agent_loop 类的装饰器，key 是 agent_name, value 是 yaml 配置格式（_target_: agent_loop 类的 fqdn），用于初始化 agent_loop 实例时使用
     """Register agent loop class."""
 
     def decorator(subclass: type[AgentLoopBase]) -> type[AgentLoopBase]:
@@ -1082,7 +1082,7 @@ class AgentLoopManager: # J：默认用于管理 AgentLoop 工作进程的类
 
     async def _init_agent_loop_workers(self):
         self.agent_loop_workers = []
-        num_workers = self.rollout_config.agent.num_workers # J：获取配置中的 AgentLoopWorker 数量
+        num_workers = self.rollout_config.agent.num_workers # J：获取配置中的 AgentLoopWorker 数量，这里可以多配置一些，用的是 CPU
 
         node_ids = [node["NodeID"] for node in ray.nodes() if node["Alive"] and node["Resources"].get("CPU", 0) > 0]
         for i in range(num_workers): # J：初始化 num_workers 个 AgentLoopWorker 实例

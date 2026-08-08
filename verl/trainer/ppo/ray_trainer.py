@@ -361,6 +361,7 @@ class RayPPOTrainer:
         lora_rank = config.actor_rollout_ref.model.get("lora", {}).get("rank", 0)
         if lora_rank <= 0:
             lora_rank = config.actor_rollout_ref.model.get("lora_rank", 0)
+        # J：如果 lora 模式训练，那么 Reference 就是 Actor 的 Base 模型部分，也就是说 ref_in_actor=True
         self.ref_in_actor = lora_rank > 0 or config.actor_rollout_ref.model.get("lora_adapter_path") is not None
 
         # define in-reward KL control
@@ -1307,7 +1308,7 @@ class RayPPOTrainer:
         # J：    情况2.2：此时当设置 no_lora_adapter=False 时，表示加载 LoRA，只使用 Base + LoRA，实现得到 Actor（ old 策略）
 
         tu.assign_non_tensor(batch_td, **metadata) # J：添加元信息，标记不需要计算 entropy，也不计算 loss
-        if self.ref_in_actor:
+        if self.ref_in_actor: # J：只有在开启 lora 时，才会出现 ref_in_actor=True
             output = self.actor_rollout_wg.compute_log_prob(batch_td)
         else:
             output = self.ref_policy_wg.compute_ref_log_prob(batch_td)
@@ -1362,7 +1363,7 @@ class RayPPOTrainer:
         rollout_config = self.config.actor_rollout_ref.rollout
         batch.meta_info["multi_turn"] = rollout_config.multi_turn.enable
         # TODO: Make "temperature" single source of truth from generation.
-        batch.meta_info["temperature"] = rollout_config.temperature
+        batch.meta_info["temperature"] = rollout_config.temperature # J: 确保和推理时的 temperature 一致，都是从 rollout_config 中读取的（其实在 Rollout 前已经赋值过一次了？这里重复但没错）
         # update actor
         batch_td = batch.to_tensordict()
         # step 2: convert from padding to no-padding
@@ -1513,7 +1514,7 @@ class RayPPOTrainer:
                         else curr_step_profile
                     )
                 batch: DataProto = DataProto.from_single_dict(batch_dict) # J：将 batch_dict 转换为 DataProto 类型
-                batch.meta_info["temperature"] = self.config.actor_rollout_ref.rollout.temperature # J：temperature 采样参数配置
+                batch.meta_info["temperature"] = self.config.actor_rollout_ref.rollout.temperature # J：temperature 采样参数配置，用于接下来采样使用
 
                 # add uid to batch
                 batch.non_tensor_batch["uid"] = np.array( # J：为每个 prompt 生成一个唯一的随机 uid，用于在 trace 中标识每个 prompt

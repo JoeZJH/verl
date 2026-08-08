@@ -56,6 +56,7 @@ class HFRollout(BaseRollout):
         do_sample = prompts.meta_info.get("do_sample", self.config.do_sample)
         is_validate = prompts.meta_info.get("validate", False)
 
+        # J：获取的是 prompts 中的 temperature，而不是 config 中的 temperature，用于对齐训推参数（保证都是从配置中读取的）
         temperature = prompts.meta_info.get("temperature", self.config.temperature)
         response_length = prompts.meta_info.get("response_length", self.config.response_length)
         top_p = prompts.meta_info.get("top_p", self.config.get("top_p", 1.0))

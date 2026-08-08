@@ -925,7 +925,7 @@ class FSDPEngineWithLMHead(FSDPEngine):
         use_remove_padding = tu.get_non_tensor_data(data=micro_batch, key="use_remove_padding", default=True)
         pad_mode = tu.get_non_tensor_data(data=micro_batch, key="pad_mode", default=DatasetPadMode.NO_PADDING)
         use_fused_kernels = tu.get_non_tensor_data(data=micro_batch, key="use_fused_kernels", default=False)
-        temperature = micro_batch["temperature"]
+        temperature = micro_batch["temperature"] # J：从数据中获取 temperature，用于保证和推理时的 temperature 一致
         temperature_item = temperature
         if use_fused_kernels:
             assert not isinstance(temperature, torch.Tensor), (
@@ -1109,7 +1109,9 @@ class FSDPEngineWithLMHead(FSDPEngine):
                                 v = gather_outputs_and_unpad(v, gather_dim=0, unpad_dim=0, padding_size=pad_size)
                             model_output[field_name] = torch.nested.nested_tensor_from_jagged(v, cu_seqlens)
             else:
+                # J：total_nnz 的含义是 batch 内所有样本去掉 padding 后的真实 token 总数 （"non-zero / non-padding tokens" 的总数）
                 logits_rmpad = output.logits.squeeze(0)  # (total_nnz, vocab_size)
+                # J：对 logits 进行 temperature 归一化（即 logits = logits / temperature），确保与推理时的 temperature 一致
                 logits_rmpad.div_(temperature_rmpad.clamp(min=1e-8).unsqueeze(-1).to(logits_rmpad.dtype))
 
                 # if use_sp: ((total_nnz / sp) + pad) ; if not use_sp: (batch, seqlen)
@@ -1191,6 +1193,7 @@ class FSDPEngineWithLMHead(FSDPEngine):
                 entropy = output.entropy[:, -response_length - 1 : -1]  # (bsz, response_length)
 
             else:
+                # J：对 logits 进行 temperature 归一化（即 logits = logits / temperature），确保与推理时的 temperature 一致
                 logits = output.logits  # (bsz, response_length, vocab_size)
                 temperature = output_args["temperature"]  # (bsz,)
                 temperature = temperature.unsqueeze(-1).unsqueeze(-1)

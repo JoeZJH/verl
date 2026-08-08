@@ -500,7 +500,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension): # J: Actor 工作进
         model_config: HFModelConfig = omega_conf_to_dataclass(self.config.model)
 
         # 1. build reference model
-        if "ref" in self.role:
+        if "ref" in self.role: # J：如果 ref 在 role 的名称中（当前一般为 actor_rollout_ref）
             # TODO: align ref config with actor config
             with open_dict(self.config.ref):
                 self.config.ref.ppo_mini_batch_size = self.config.actor.ppo_mini_batch_size
