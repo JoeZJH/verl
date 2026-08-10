@@ -541,8 +541,12 @@ class vLLMHttpServer:
 
         # Get final response
         final_res: Optional[RequestOutput] = None
+        # J：generator：这是一个异步生成器（由 async def 定义且内部包含 yield 的函数）或者异步可迭代对象
+        # J：   实际上，generator 是 vLLM V1 AsyncLLM.generate() 返回的 async generator （异步生成器），类型为 AsyncGenerator[RequestOutput, None]
+        # J：   它不会一次性返回所有数据，而是分多次“推送”数据
+        # J：async for：异步迭代语句，每次循环时，它会 await 生成器的 __anext__() 方法，等待生成器异步地产生下一个值
         async for output in generator:
-            final_res = output
+            final_res = output # J：每次拿到新值，就直接覆盖掉 final_res 变量
         assert final_res is not None
 
         # Handle abort case: when the request is aborted by pause_generation(abort),

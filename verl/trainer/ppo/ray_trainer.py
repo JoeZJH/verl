@@ -1377,7 +1377,7 @@ class RayPPOTrainer:
             else False
         )
         ppo_mini_batch_size = self.config.actor_rollout_ref.actor.ppo_mini_batch_size
-        ppo_mini_batch_size = ppo_mini_batch_size * self.config.actor_rollout_ref.rollout.n
+        ppo_mini_batch_size = ppo_mini_batch_size * self.config.actor_rollout_ref.rollout.n  # J：注意这里的原始的 ppo_mini_batch_size 乘以 rollout_n 才是最终 更新用的 batch_size
         ppo_epochs = self.config.actor_rollout_ref.actor.ppo_epochs
         seed = self.config.actor_rollout_ref.actor.data_loader_seed
         shuffle = self.config.actor_rollout_ref.actor.shuffle
@@ -1406,7 +1406,7 @@ class RayPPOTrainer:
         # step 2: convert from padding to no-padding
         batch_td = left_right_2_no_padding(batch_td)
         ppo_mini_batch_size = self.config.critic.ppo_mini_batch_size
-        ppo_mini_batch_size = ppo_mini_batch_size * self.config.actor_rollout_ref.rollout.n
+        ppo_mini_batch_size = ppo_mini_batch_size * self.config.actor_rollout_ref.rollout.n # J：注意这里的原始的 ppo_mini_batch_size 乘以 rollout_n 才是最终 更新用的 batch_size
         ppo_epochs = self.config.critic.ppo_epochs
         seed = self.config.critic.data_loader_seed
         shuffle = self.config.critic.shuffle
