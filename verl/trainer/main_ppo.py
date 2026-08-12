@@ -387,11 +387,12 @@ def create_rl_sampler(data_config, dataset): # J：创建数据集的采样器�
     # Use a sampler to facilitate checkpoint resumption.
     # If shuffling is enabled in the data configuration, create a random sampler.
     if data_config.shuffle: # J：如果数据配置中启用了 shuffle 选项, 则创建随机采样器
-        train_dataloader_generator = torch.Generator()
+        train_dataloader_generator = torch.Generator() # J: 如果不手动设置 seed ，这里会使用固定的 seed（67280421310721，已经亲自测试）
         seed = data_config.get("seed")
         if seed is not None:
             train_dataloader_generator.manual_seed(seed)
         # J：创建随机采样器，用于在训练时随机采样数据集中的样本
+        # J：注意，如果没有给 train_dataloader_generator 配置 seed，train_dataloader_generator 会默认使用固定的 seed，所以不用担心没有配置 seed 时会引发数据不一致
         sampler = RandomSampler(data_source=dataset, generator=train_dataloader_generator)
     else:
         # J：如果数据配置中未启用 shuffle 选项, 则创建顺序采样器

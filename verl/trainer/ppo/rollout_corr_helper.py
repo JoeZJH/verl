@@ -564,7 +564,7 @@ def compute_rollout_correction_weights(
     if rollout_is not in valid_is_levels:
         raise ValueError(f"Invalid rollout_is: {rollout_is}. Must be one of {valid_is_levels}.")
     rollout_is_threshold_upper, rollout_is_threshold_lower = _parse_rollout_is_threshold(rollout_is_threshold)
-    use_icepop = rollout_is_threshold_lower is not None
+    use_icepop = rollout_is_threshold_lower is not None # J：是否使用 IcePop 的依据是是否给出 lower bound
 
     # Compute IS weights from log ratio (handles different aggregation levels)
     if rollout_is == "token":
@@ -578,7 +578,7 @@ def compute_rollout_correction_weights(
         log_ratio_sum: torch.Tensor = verl_F.masked_sum(log_ratio, response_mask, axis=-1).unsqueeze(
             -1
         )  # Shape: (batch_size, 1)
-        log_ratio_for_metrics = log_ratio_sum
+        log_ratio_for_metrics = log_ratio_sum # J：sequence 时，这个指标对应的是 sum 的结果
 
         log_ratio_sum_safe: torch.Tensor = torch.clamp(log_ratio_sum, min=-SAFETY_BOUND, max=SAFETY_BOUND)
         raw_rollout_is_weights = torch.exp(log_ratio_sum_safe).expand_as(log_ratio)  # Broadcast to sequence length
@@ -590,7 +590,7 @@ def compute_rollout_correction_weights(
     raw_rollout_is_weights = raw_rollout_is_weights * response_mask
 
     # Apply TIS for a single upper bound and IcePop for a lower_upper string.
-    if not use_icepop:
+    if not use_icepop: # J：如果使用 IcePop，则使用的是 mask 而不是 clamp
         rollout_is_weights = raw_rollout_is_weights.clamp(max=rollout_is_threshold_upper)
     else:
         assert rollout_is_threshold_lower is not None
@@ -691,6 +691,7 @@ def compute_is_metrics(
     device: torch.device = rollout_is_weights.device
     # Default lower threshold (reciprocal of upper threshold)
     rollout_is_threshold_lower = (
+        # J：如果没有指定 lower threshold，就默认取 1.0 / upper threshold
         1.0 / rollout_is_threshold if rollout_is_threshold_lower is None else rollout_is_threshold_lower
     )
 
@@ -749,9 +750,9 @@ def compute_is_metrics(
         metrics["rollout_is_std"] = 0.0
 
     # Compute Effective Sample Size (ESS) for truncated weights
-    weights_for_ess: torch.Tensor = rollout_is_weights.clamp(min=0.0, max=rollout_is_threshold)
-    mean_for_ess: torch.Tensor = verl_F.masked_mean(weights_for_ess, response_mask)
-    is_weights_normalized: torch.Tensor = weights_for_ess / (mean_for_ess + 1e-8)  # Avoid division by zero
+    weights_for_ess: torch.Tensor = rollout_is_weights.clamp(min=0.0, max=rollout_is_threshold) # J：将权重钳制在 [0.0, rollout_is_threshold] 范围内
+    mean_for_ess: torch.Tensor = verl_F.masked_mean(weights_for_ess, response_mask) # J：求重要性权重的均值
+    is_weights_normalized: torch.Tensor = weights_for_ess / (mean_for_ess + 1e-8)  # Avoid division by zero # J：归一化
     metrics["rollout_is_eff_sample_size"] = (
         1.0 / verl_F.masked_mean(is_weights_normalized.square(), response_mask).item()
     )

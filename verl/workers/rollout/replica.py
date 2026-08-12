@@ -257,6 +257,11 @@ class RolloutReplica(ABC):
     def max_concurrency(self) -> int:
         # 1000 is Ray's default max_concurrency for async execution.
         # Add some margin to account for control method call.
+        # J：max_num_seqs 部分 ：覆盖并发的 generate 调用
+        # J：CONTROL_METHOD_CONCURRENCY = 16 是为了为 控制类方法 预留的余量，比如 wake_up / sleep / abort_all_requests / resume_generation / clear_kv_cache / release_kv_cache / resume_kv_cache / start_profile / stop_profile 等函数
+        # J：为什么必须留余量 ：
+        # J：   如果不加这 16，当 actor 已被 max_num_seqs 条 generate 调用占满并发槽时，控制方法（比如训练步之间需要 sleep / wake_up 、或者需要 abort_all_requests 中断当前 rollout）就会被排队阻塞，可能导致死锁或训练流程卡死。预留 16 个槽位保证控制信号随时能被处理
+        # J：max(1000, ...) ：保证不会低于 Ray 异步执行的默认 max_concurrency=1000 ，避免在 max_num_seqs 配置较小时反而降低了 Ray 默认的并发能力
         return max(1000, self.config.max_num_seqs + CONTROL_METHOD_CONCURRENCY)
 
     def rollout_worker_use_gpu(self) -> bool:
