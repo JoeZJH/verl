@@ -75,14 +75,14 @@ class ToolParser(ABC): # J：定义工具 Parser 基类
         raise NotImplementedError
 
     @classmethod
-    def get_tool_parser(cls, name: str, tokenizer): # J：根据工具 Parser 名称获取工具 Parser
+    def get_tool_parser(cls, name: str, tokenizer): # J：根据工具 Parser 名称获取工具 Parser，返回的都是 ToolParser 的子类（注意是实例对象，不是类对象）
         if name not in cls._registry:
             raise ValueError(f"Unknown tool parser: {name}")
         return cls._registry[name](tokenizer) # J：返回工具 Parser 实例(根据 Tokenizer 初始化)
 
     @classmethod
-    def register(cls, name: str): # J：注册工具 Parser
-        def decorator(subclass: type[ToolParser]) -> type[ToolParser]:
+    def register(cls, name: str): # J：注册工具 Parser，目前已经注册了类似 [hermes, gpt-oss, qwen3-coder, gemma4] 等
+        def decorator(subclass: type[ToolParser]) -> type[ToolParser]: # J：被注册的这些类都是 ToolParser 的子类
             cls._registry[name] = subclass
             return subclass
 
@@ -101,16 +101,16 @@ class HermesToolParser(ToolParser): # J：定义 Hermes Tool Parser，继承 Too
         self.tool_call_regex = regex.compile(r"<tool_call>(.*?)</tool_call>", regex.DOTALL)
 
     @rollout_trace_op
-    async def extract_tool_calls(
+    async def extract_tool_calls( # J：实现 提取 tool calls 的函数，从 Hermes 模型的响应中提取工具调用
         self, responses_ids: list[int], tools: list[OpenAIFunctionToolSchema] = None
     ) -> tuple[str, list[FunctionCall]]:
         loop = get_event_loop()
-        text = await loop.run_in_executor(None, self.tokenizer.decode, responses_ids)
+        text = await loop.run_in_executor(None, self.tokenizer.decode, responses_ids) # J：解码响应 Token 为文本文本
         if self.tool_call_start_token not in text or self.tool_call_end_token not in text:
-            return text, []
+            return text, [] # J：如果文本中没有工具调用 Token，则直接返回文本和空列表
 
-        matches = self.tool_call_regex.findall(text)
-        function_calls = []
+        matches = self.tool_call_regex.findall(text) # J：使用正则表达式提取所有匹配的工具调用
+        function_calls = [] # J：初始化一个空列表，用于存储提取到的工具调用
         for match in matches: # J：遍历所有匹配的工具调用
             try:
                 function_call = json.loads(match) # J：解析 JSON 字符串为函数调用

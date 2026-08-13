@@ -52,9 +52,9 @@ class FunctionTool: # J：函数工具对象，用于存储函数工具的元数
     - ``fn``: the underlying callable
     """
 
-    name: str
+    name: str # J: 工具名称
     fn: Callable[..., Any] # J：底层函数工具对象，可调用的函数
-    tool_schema: OpenAIFunctionToolSchema
+    tool_schema: OpenAIFunctionToolSchema # J：OpenAI 的 FunctionToolSchema 格式
     is_async: bool = False # J：是否为协程
 
     async def call(self, parameters: dict[str, Any]) -> Any: # J：调用函数工具，根据 is_async 参数选择不同的调用方式
@@ -67,7 +67,6 @@ class FunctionTool: # J：函数工具对象，用于存储函数工具的元数
 # J：在 Python 中，装饰器有两种常见写法：
 # J:    不带括号：@function_tool （此时 function_tool 直接接收被装饰的函数作为第一个参数）
 # J:    带括号：@function_tool("custom_name") （此时 function_tool 先执行，返回一个真正的装饰器，然后再接收被装饰的函数）
-# J: 
 def function_tool( 
     name: Optional[str | Callable] = None, # J：工具名称，或函数对象本身
     *,
@@ -77,10 +76,11 @@ def function_tool(
 
     The OpenAI tool schema is inferred from the function via
     :func:`transformers.utils.get_json_schema`, so the function **must** carry:
-
-    - a Google-style docstring summarising the tool;
-    - a ``Args:`` block describing every parameter;
-    - a type hint on every parameter.
+    
+    # J：函数必须携带以下内容，才能被注册为工具：
+    - a Google-style docstring summarising the tool; # J：函数的文档字符串，用于描述工具的功能和参数
+    - a ``Args:`` block describing every parameter; # J：函数的参数描述，用于描述每个参数的含义和类型
+    - a type hint on every parameter. # J：每个参数的类型提示，用于描述参数的类型和范围
 
     If any of those are missing, ``transformers`` raises
     ``DocstringParsingException`` / ``TypeHintParsingException`` at
@@ -88,10 +88,10 @@ def function_tool(
 
     Supports both decorator forms::
 
-        @function_tool                          # bare, name = fn.__name__
+        @function_tool                          # bare, name = fn.__name__ # J：不带括号的装饰器，工具名称默认为函数名
         def web_search(...): ...
 
-        @function_tool("web_search")            # rename the tool
+        @function_tool("web_search")            # rename the tool # J：带括号的装饰器，工具名称为 web_search
         def search(...): ...
 
     Args:
@@ -113,7 +113,7 @@ def function_tool(
             elif isinstance(schema, dict):
                 built_schema = OpenAIFunctionToolSchema.model_validate(schema)
             else:
-                built_schema = _build_schema_from_fn(fn, tool_name)
+                built_schema = _build_schema_from_fn(fn, tool_name) # J：内部会调用 transformers.utils.get_json_schema(fn) 完成 schema 推断
 
             entry = FunctionTool( # J：创建函数工具对象
                 name=tool_name, # J：工具名称
@@ -131,7 +131,7 @@ def function_tool(
                 )
             FUNCTION_TOOL_REGISTRY[tool_name] = entry # J：注册函数工具
             logger.info("Registered function tool '%s' from %s.%s", tool_name, fn.__module__, fn.__qualname__)
-            return fn # J：返回底层函数工具对象本身
+            return fn # J：返回底层函数工具对象本身，当这个 FunctionTool 函数工具被调用时，会调用底层函数 fn，fn 的返回值
 
         return decorator
     # if callable(name) and schema is None: 用来处理装饰器的两种写法（不带括号和带括号）的差异
@@ -189,7 +189,7 @@ def load_function_tools_from_path(path: str) -> list[FunctionTool]: # J：从 py
     return tools # J：返回新注册的函数工具（注意：仅返回新注册的函数工具，之前已注册的函数工具不会被返回）
 
 
-def _build_schema_from_fn(fn: Callable, tool_name: str) -> OpenAIFunctionToolSchema:
+def _build_schema_from_fn(fn: Callable, tool_name: str) -> OpenAIFunctionToolSchema: # J：调用 transformers.utils.get_json_schema(fn) 完成 schema 推断
     """Infer the OpenAI tool schema for ``fn`` via transformers.
 
     The heavy lifting (signature inspection + Google-style docstring parsing
@@ -210,7 +210,7 @@ def _build_schema_from_fn(fn: Callable, tool_name: str) -> OpenAIFunctionToolSch
             f"named parameters."
         )
 
-    raw = get_json_schema(fn)
+    raw = get_json_schema(fn) # J：get_json_schema 是 transformers.utils.get_json_schema 函数， 它必须从 docstring + 注解解析出 JSON Schema ，少一个就抛异常
     raw["function"]["name"] = tool_name
     return OpenAIFunctionToolSchema.model_validate(raw)
 
@@ -233,13 +233,13 @@ def normalize_function_tool_return(ret: Any) -> tuple[ToolResponse, float, dict]
     ``None`` is detected via ``is None`` rather than truthiness, so a
     legitimate ``0`` / ``0.0`` / ``False`` reward is preserved.
     """
-    if isinstance(ret, ToolResponse):
+    if isinstance(ret, ToolResponse): # J：如果结果已经是 ToolResponse，直接返回 ToolResponse, reward 0.0, metrics {}
         return ret, 0.0, {}
-    if isinstance(ret, str):
+    if isinstance(ret, str): # J：如果结果是字符串，将字符串转换为 ToolResponse, reward 0.0, metrics {}
         return ToolResponse(text=ret), 0.0, {}
-    if isinstance(ret, dict):
+    if isinstance(ret, dict): # J：如果结果是字典，将字典转换为 ToolResponse, reward 0.0, metrics {}
         return ToolResponse(text=json.dumps(ret, ensure_ascii=False)), 0.0, {}
-    if isinstance(ret, tuple):
+    if isinstance(ret, tuple): # J：如果结果是元组，根据元组长度判断是否包含 reward 和 metrics
         if not 1 <= len(ret) <= 3:
             raise TypeError(
                 f"@function_tool return tuple must have length 1, 2, or 3 "
@@ -250,7 +250,7 @@ def normalize_function_tool_return(ret: Any) -> tuple[ToolResponse, float, dict]
         reward = 0.0 if len(ret) < 2 or ret[1] is None else float(ret[1])
         metrics = {} if len(ret) < 3 or ret[2] is None else dict(ret[2])
         return response, reward, metrics
-    return ToolResponse(text=str(ret)), 0.0, {}
+    return ToolResponse(text=str(ret)), 0.0, {} # J：将其他类型的结果转换为 ToolResponse, reward 0.0, metrics {}
 
 
 def _coerce_response(value: Any) -> ToolResponse:

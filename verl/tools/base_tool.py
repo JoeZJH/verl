@@ -34,10 +34,10 @@ class BaseTool: # J：基础工具类，所有工具的基类
     """
 
     def __init__(self, config: dict, tool_schema: OpenAIFunctionToolSchema):
-        self.config = config
+        self.config = config # J：读取 config
         self.tool_schema = tool_schema or self.get_openai_tool_schema() # J：工具 schema
         assert self.tool_schema is not None, "Tool schema is not set!"
-        self.name = self.tool_schema.function.name # J：工具名称
+        self.name = self.tool_schema.function.name # J：使用 tool_schema.function 中的 name 作为工具名称
         print(json.dumps(self.tool_schema.model_dump(exclude_unset=True, exclude_none=True), indent=2)) # J：打印工具 schema
 
     def get_openai_tool_schema(self) -> OpenAIFunctionToolSchema: # J：获取工具的 OpenAI 格式 schema
@@ -53,9 +53,14 @@ class BaseTool: # J：基础工具类，所有工具的基类
             The instance id of the tool.
             tool_creation_response: The response of the tool when creating the instance.
         """
-        if instance_id is None:
+        # J：注意：instance_id 是 trajectory 粒度的，每次 create 都会生成一个新的 instance_id(默认 uuid4())
+        # J：随后的 execute 和 release 原样透传（注意：BaseTool 对象自身不存储这个值，这个是 trajectory 粒度的）
+        # J：思考：高阶实现：子类实现时可以将 instance_id 作为 key 来存储工具实例的状态，为每个 trajectory 保持一个独立的工具实例状态
+
+        # J：如果 instance_id 为空 则生成一个随机的 instance_id，返回 instance_id 和 调用结果
+        if instance_id is None: # J：如果 instance_id 为空 则生成一个随机的 instance_id，返回 instance_id 和 调用结果
             return str(uuid4()), ToolResponse()
-        else:
+        else: # J：否则直接返回 instance_id 和 调用结果
             return instance_id, ToolResponse()
 
     # J：执行工具，详情请参考 examples.tutorial.agent_loop_get_started.sandbox.SandboxTool.execute

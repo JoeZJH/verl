@@ -37,8 +37,25 @@ class OpenAIFunctionParametersSchema(BaseModel):
     # ``required`` can be omitted when no parameter is required.
     required: list[str] = Field(default_factory=list)
 
-
-class OpenAIFunctionSchema(BaseModel):
+# # J： OpenAI Function Schema 的 JSON 格式定义如下：
+#    {
+#         "name": "tool_name",                # 工具名称
+#         "description": "工具描述文本",        # 工具描述
+#         "parameters": {
+#             "type": "object",
+#             "properties": {
+#                 "param_name": {
+#                     "type": "string | integer | ...",  # 参数类型
+#                     "description": "参数描述",          # 可选
+#                     "enum": ["option1", "option2"]      # 可选，枚举值
+#                 },
+#                 # ... 更多参数
+#             },
+#             "required": ["param1", "param2"]  # 必填参数列表
+#         },
+#         "strict": False                     # 是否启用严格模式
+#     }
+class OpenAIFunctionSchema(BaseModel): # J: OpenAI Function Schema 的定义
     """The schema of a function in OpenAI format."""
 
     name: str
@@ -69,11 +86,11 @@ class OpenAIFunctionSchema(BaseModel):
 #         "strict": False                     # 是否启用严格模式
 #     }
 # }
-class OpenAIFunctionToolSchema(BaseModel):
+class OpenAIFunctionToolSchema(BaseModel): # J：OpenAI 格式的 工具 Schema
     """The schema of a tool in OpenAI format."""
 
     type: str
-    function: OpenAIFunctionSchema
+    function: OpenAIFunctionSchema # J：中间嵌套了一个 OpenAIFunctionSchema
 
 
 class OpenAIFunctionParsedSchema(BaseModel):

@@ -18,7 +18,7 @@ from transformers.utils import get_json_schema
 
 from verl.tools.base_tool import BaseTool, OpenAIFunctionToolSchema, ToolResponse
 
-class SandboxTool(BaseTool): # J：沙盒工具
+class SandboxTool(BaseTool): # J：沙盒工具类
     def __init__(self, config: dict, tool_schema: OpenAIFunctionToolSchema):
         super().__init__(config, tool_schema)
         # Different model may use different code pattern, e.g. python, py, etc.

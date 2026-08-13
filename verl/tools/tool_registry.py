@@ -48,7 +48,7 @@ def get_tool_class(cls_name): # J：根据类名获取工具类
     else:
         module = sys.modules[module_name]
 
-    tool_cls = getattr(module, class_name)
+    tool_cls = getattr(module, class_name) # J：从模块中获取类名对应的类
     return tool_cls
 
 
@@ -57,6 +57,7 @@ def initialize_tools_from_config(tools_config_file) -> list: # J：从 yaml 配�
     tools_config = OmegaConf.load(tools_config_file)
     tool_list = []
 
+    # J：tools_config 中会包含一个叫做 tools 的字段，里面列出了所有工具的定义
     for tool_config in tools_config.tools: # J：遍历配置文件中的所有工具配置
         cls_name = tool_config.class_name # J：工具类名
         tool_type = ToolType(tool_config.config.type) # J：工具类型，当前仅支持 NATIVE
@@ -89,9 +90,14 @@ def load_all_tools( # J：加载所有工具，包括 NativeTool 和 FunctionToo
     # J：从配置文件加载本地工具，包括 NativeTool 和 FunctionTool
     # # J：从 yaml 配置文件（通过 tool_config_path 指定）加载 Native 工具，YAML 配置文件 + BaseTool 的子类
     # # J：返回的 BaseTool 包含 execute 携程方法用于执行工具
+    # # J：NativeTool 一般都都继承自：verl.tools.base_tool.BaseTool（具体类名 yaml 配置中需要写出）
+    # # J:   NativeTool 有状态，包含 config, tool_shema 以及其他可自定的参数等，且包含 get_openai_tool_schema，create, execute, release 和 calc_reward 等函数
+    # # J：   NativeTool 用于执行自定义的沙盒执行， 搜索引擎和 爬虫等有状态的工具
     native_tools: list = initialize_tools_from_config(tool_config_path) if tool_config_path else []
     # # J：从 python 文件（通过 function_tool_path 指定）加载 Function 工具
     # # J：返回的 FunctionTool 包含 call 协程方法用于执行工具
+    # # J：   FunctionTool 是无状态的，是一个 FunctionTool 类对象，包含 name, fn, 和 tool_shema 等，核心是 call 函数
+    # # J：   FunctionTool 用于天气查询，计算器等无状态函数
     function_tools: list[FunctionTool] = load_function_tools_from_path(function_tool_path) if function_tool_path else []
 
     if function_tools and native_tools:

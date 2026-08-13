@@ -106,24 +106,24 @@ class ToolAgentLoop(AgentLoopBase): # J：定义工具 Agent 循环
         """
         super().__init__(*args, **kwargs)
 
-        self.max_user_turns = self.rollout_config.multi_turn.max_user_turns
-        self.max_assistant_turns = self.rollout_config.multi_turn.max_assistant_turns
-        self.max_parallel_calls = self.rollout_config.multi_turn.max_parallel_calls
-        self.max_tool_response_length = self.rollout_config.multi_turn.max_tool_response_length
-        self.tool_response_truncate_side = self.rollout_config.multi_turn.tool_response_truncate_side
+        self.max_user_turns = self.rollout_config.multi_turn.max_user_turns # J：最大用户轮数
+        self.max_assistant_turns = self.rollout_config.multi_turn.max_assistant_turns # J：最大助手轮数
+        self.max_parallel_calls = self.rollout_config.multi_turn.max_parallel_calls # J：最大并行调用数
+        self.max_tool_response_length = self.rollout_config.multi_turn.max_tool_response_length # J：最大工具响应长度
+        self.tool_response_truncate_side = self.rollout_config.multi_turn.tool_response_truncate_side # J：工具响应截断侧，默认从中间截断
 
         tool_list = tools.tools if tools else [] # J：获取工具列表，默认为空列表
         self.tools = {tool.name: tool for tool in tool_list} # J：将工具列表转换为字典，键为工具名称，值为工具对象
         # J：注，这里的工具是 Pydantic 模型，需要使用 model_dump 方法转换为 dict 格式
         self.tool_schemas = [tool.tool_schema.model_dump(exclude_unset=True, exclude_none=True) for tool in tool_list] # J：将工具列表转换为 dict 列表(按照工具定义的 schema 转换)
-        self.tool_parser = ToolParser.get_tool_parser(self.rollout_config.multi_turn.format, self.tokenizer)
-        self.tool_parser_name = self.rollout_config.multi_turn.format
+        self.tool_parser = ToolParser.get_tool_parser(self.rollout_config.multi_turn.format, self.tokenizer) # J：根据工具 Parser 名称获取工具 Parser，并输入 tokenizer 为参数初始化 ToolParser 实例
+        self.tool_parser_name = self.rollout_config.multi_turn.format # J：获取工具 Parser 名称(就使用 format)
 
-        self.prompt_length = self.rollout_config.prompt_length
+        self.prompt_length = self.rollout_config.prompt_length # J：最大 prompt 长度
         self.response_length = self.rollout_config.response_length # J：最大响应长度
 
     @rollout_trace_op
-    async def run(self, sampling_params: dict[str, Any], **kwargs) -> AgentLoopOutput:
+    async def run(self, sampling_params: dict[str, Any], **kwargs) -> AgentLoopOutput: # J：AgentLoop 的核心函数
         messages = list(kwargs["raw_prompt"])
 
         # extract multimodal inputs from messages
@@ -155,7 +155,7 @@ class ToolAgentLoop(AgentLoopBase): # J：定义工具 Agent 循环
             # J：selected 包含同时在 extra_info.tool_selection 中和 self.tools 中的工具名称
             selected = {name: self.tools[name] for name in tool_selection if name in self.tools} # J：根据 extra_info.tool_selection 选择工具，selected 是一个字典，键是工具名称，值是工具对象
             agent_data._active_tools = selected # J：将 active_tools 设置为 selected，即只使用 extra_info.tool_selection 中的工具
-            agent_data._active_tool_schemas = [
+            agent_data._active_tool_schemas = [ # J：将 active_tools 中的工具 schema 转换为 dict 列表，后续传入 apply_chat_template 方法
                 t.tool_schema.model_dump(exclude_unset=True, exclude_none=True) for t in selected.values()
             ]
         else: # J：如果没有 tool_selection，默认全选所有工具
@@ -209,7 +209,7 @@ class ToolAgentLoop(AgentLoopBase): # J：定义工具 Agent 循环
 
     async def _handle_pending_state(self, agent_data: AgentData, sampling_params: dict[str, Any]) -> AgentState: # J：处理 PENDING 状态，准备 prompt_ids 并返回 GENERATING 状态
         """Handle the pending state: prepare the prompt and start generation."""
-        schemas = getattr(agent_data, "_active_tool_schemas", self.tool_schemas)
+        schemas = getattr(agent_data, "_active_tool_schemas", self.tool_schemas) # J：获取 active_tools 中的 tool_schemas，默认使用 self.tool_schemas
         prompt_ids = await self.apply_chat_template( # J：应用聊天模板，生成 prompt_ids
             agent_data.messages, # J：针对 agent_data 中当前的所有 messages 进行 apply_chat_template
             tools=schemas,
