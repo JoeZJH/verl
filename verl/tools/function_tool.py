@@ -247,8 +247,8 @@ def normalize_function_tool_return(ret: Any) -> tuple[ToolResponse, float, dict]
                 f"(response, reward), or (response, reward, metrics)."
             )
         response = _coerce_response(ret[0])
-        reward = 0.0 if len(ret) < 2 or ret[1] is None else float(ret[1])
-        metrics = {} if len(ret) < 3 or ret[2] is None else dict(ret[2])
+        reward = 0.0 if len(ret) < 2 or ret[1] is None else float(ret[1]) # J: 转换成 float 类型
+        metrics = {} if len(ret) < 3 or ret[2] is None else dict(ret[2]) # J: 转换成字典
         return response, reward, metrics
     return ToolResponse(text=str(ret)), 0.0, {} # J：将其他类型的结果转换为 ToolResponse, reward 0.0, metrics {}
 

@@ -294,7 +294,7 @@ class ToolAgentLoop(AgentLoopBase): # J：定义工具 Agent 循环
 
         tasks = []
         tool_call_names = []
-        for tool_call in agent_data.tool_calls[: self.max_parallel_calls]: # J：遍历工具调用列表，最多执行 max_parallel_calls 个工具调用
+        for tool_call in agent_data.tool_calls[: self.max_parallel_calls]: # J：遍历工具调用列表，最多执行 max_parallel_calls 个工具调用，超过的似乎就丢掉了
             tasks.append(self._call_tool(tool_call, agent_data.tools_kwargs, agent_data)) # J：启动工具调用任务，将任务添加到任务列表中，实现并行调用
             tool_call_names.append(tool_call.name) # J：将工具调用名称添加到 tool_call_names 中
 

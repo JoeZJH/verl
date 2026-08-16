@@ -980,9 +980,9 @@ class AgentLoopWorker: # J：一般被注册为远程 Actor，用于并行处理
             non_tensor_batch.update(input_non_tensor_batch) # J：更新 non_tensor_batch 字典
 
         # add reward_extra_info to non_tensor_batch
-        reward_extra_infos = [input.extra_fields.get("reward_extra_info", {}) for input in inputs]
-        reward_extra_keys = list(reward_extra_infos[0].keys()) # J：获取第一个样本的 reward_extra_info 中的所有键名
-        for key in reward_extra_keys:
+        reward_extra_infos = [input.extra_fields.get("reward_extra_info", {}) for input in inputs] # J：从 extra_fileds 字段中抽取相关奖励附加信息，用于落表等
+        reward_extra_keys = list(reward_extra_infos[0].keys()) # J：获取第一个样本的 reward_extra_info 中的所有键名，后续会基于这些 key 来完成 dump generations
+        for key in reward_extra_keys: # J：对齐 reward_extra_keys 抽取相关字段，方便后续落表 dump generations 使用
             non_tensor_batch[key] = np.array([info[key] for info in reward_extra_infos])
 
         # Add multi_modal_inputs to non_tensor_batch if any samples have them
@@ -1007,11 +1007,11 @@ class AgentLoopWorker: # J：一般被注册为远程 Actor，用于并行处理
             temp_arr[:] = [input.extra_fields.get(key) for input in inputs] # J：将每个样本的 extra_fields 中的值赋值给 temp_arr
             extra_fields[key] = temp_arr # J：将 temp_arr 添加到 extra_fields 字典中
 
-        non_tensor_batch.update(extra_fields) # J：更新 non_tensor_batch 字典
+        non_tensor_batch.update(extra_fields) # J：将 extra_fileds 中的所有字段添加到 non_tensor_batch 字典，方便后续 dump 到 generation 文件中
 
         # Only include reward_extra_keys in meta_info if rm_scores is in batch
         # This avoids conflicts when reward_tensor is merged later in ray_trainer.py
-        if "rm_scores" in batch.keys():
+        if "rm_scores" in batch.keys(): # J：注意，这里可能丢弃了 reward_extra_keys，如果不包含 "rm_scores" 字段时也想上报 reward_extra_keys 呢？
             meta_info = {"metrics": metrics, "reward_extra_keys": reward_extra_keys} # J：如果 batch 中包含 rm_scores，需要将 reward_extra_keys 也包含在 meta_info 中
         else:
             meta_info = {"metrics": metrics}

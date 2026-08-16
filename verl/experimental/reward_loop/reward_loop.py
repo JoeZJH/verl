@@ -345,7 +345,7 @@ class RewardLoopManager: # J：RewardLoopManager 类定义，RewardLoopManager �
         rm_scores = self.reward_manager_cls.assemble_rm_scores(data, scores) # J：将每个样本的 reward score 赋值给 rm_scores 张量的最后一个 Response token
         batch = TensorDict({"rm_scores": rm_scores}, batch_size=len(data)) # J：len(data) 和 rm_scores.size(0) 相同
 
-        reward_extra_infos = [output.get("reward_extra_info", {}) for output in outputs_flat]
+        reward_extra_infos = [output.get("reward_extra_info", {}) for output in outputs_flat] # J：抽取 reward_extra_info 的信息
         reward_extra_keys = list(reward_extra_infos[0].keys())
         non_tensor_batch = {}
         for key in reward_extra_keys:

@@ -998,7 +998,7 @@ class RayPPOTrainer:
         # teacher loop workers can sleep/wake together with rollout workers
         # J：如果 enable_agent_reward_loop 为 True，直接将 reward_loop_workers 传递给 AgentLoopManager，因为在 AgentLoopManager 中会使用这些 worker 来流式计算奖励，否则传递 None
         reward_loop_worker_handles = self.reward_loop_manager.reward_loop_workers if enable_agent_reward_loop else None
-        self.async_rollout_manager = AgentLoopManager.create( # J：创建 AgentLoopManager 实例
+        self.async_rollout_manager = AgentLoopManager.create( # J：创建 AgentLoopManager 实例，默认使用 verl.experimental.agent_loop.AgentLoopManager
             config=self.config,
             llm_client=self.llm_server_manager.get_client(), # J：获取 LLMServerManager 实例的 client
             teacher_client=self.teacher_model_manager.get_client() if self.use_teacher_policy else None, # J：For MOPD
@@ -1620,6 +1620,7 @@ class RayPPOTrainer:
                         # J：问题，score 指标（原始模型打分）似乎没有被上报到 metrics 中？
                         # J：回答：上报了，在后面的 compute_data_metrics 函数中收集到 critic/score/xxx 指标中，然后汇总以后上报的
                         # extract reward_tensor and reward_extra_infos_dict for training
+                        # reward_extra_infos_dict = {key: batch.non_tensor_batch[key] for key in batch.meta_info.reward_extra_keys}
                         reward_tensor, reward_extra_infos_dict = extract_reward(batch) # J：从 batch 中提取 reward_tensor（"rm_scores"） 和 reward_extra_infos_dict（meta_info["reward_extra_keys"] 对应的 non_tensor_batch 中的数据） 字段
 
                     # Operating Mode Selection:
@@ -1686,7 +1687,7 @@ class RayPPOTrainer:
 
                     with marked_timer("adv", timing_raw, color="brown"):
                         # we combine with rule-based rm
-                        reward_extra_infos_dict: dict[str, list]
+                        reward_extra_infos_dict: dict[str, list] # J: 类型注解，reward_extra_infos_dict 变量在前面定义了，这里只是类型说明（不一样也不会抛异常）
                         batch.batch["token_level_scores"] = reward_tensor # J：reward_tensor 是前面计算得到的 reward 信息，这里赋值为 token_level_scores，注意，从此不再是 rm_scores 字段
 
                         if reward_extra_infos_dict: # J：如果有 reward_extra_infos_dict，说明有额外的奖励信息，需要合并到 batch 中
