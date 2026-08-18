@@ -974,7 +974,7 @@ class AgentLoopWorker: # J：一般被注册为远程 Actor，用于并行处理
             batch["rm_scores"] = rm_scores # J：将 rm_scores 添加到 batch 中
 
         non_tensor_batch = {
-            "__num_turns__": np.array([input.num_turns for input in inputs], dtype=np.int32), # J：每个样本的轮数
+            "__num_turns__": np.array([input.num_turns for input in inputs], dtype=np.int32), # J：每个样本的轮数（注意当前传入的不是 assitant 的 message 数量，而是累计了 user 和 tool 轮次的计数），理论上是 assistant 轮次的两倍
         }
         if self.reward_loop_worker_handles is None and input_non_tensor_batch:
             non_tensor_batch.update(input_non_tensor_batch) # J：更新 non_tensor_batch 字典

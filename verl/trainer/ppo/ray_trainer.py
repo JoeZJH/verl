@@ -758,6 +758,7 @@ class RayPPOTrainer:
                     metric_dict[pfx] = metric_val
 
         if len(sample_turns) > 0:
+            # J：注意，这里上报的指标使用的是 test_batch.non_tensor_batch["__num_turns__"], 抽取到的是在之前 ToolAgentLoop.run 上绑定上去的 agent_data.user_turns + agent_data.assistant_turns + 1
             sample_turns = np.concatenate(sample_turns)
             metric_dict["val-aux/num_turns/min"] = sample_turns.min()
             metric_dict["val-aux/num_turns/max"] = sample_turns.max()

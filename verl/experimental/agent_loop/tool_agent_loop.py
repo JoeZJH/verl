@@ -195,7 +195,7 @@ class ToolAgentLoop(AgentLoopBase): # J：定义工具 Agent 循环
             response_logprobs=agent_data.response_logprobs[: self.response_length]
             if agent_data.response_logprobs
             else None,
-            num_turns=agent_data.user_turns + agent_data.assistant_turns + 1,
+            num_turns=agent_data.user_turns + agent_data.assistant_turns + 1, # J: 注意这里的轮次，不是 assistant_turns，上报的时候使用了 num_turns，所以最终上报的结果比预想的大（一般大一倍左右）
             metrics=agent_data.metrics,
             routed_experts=(
                 agent_data.routed_experts[: len(prompt_ids) + self.response_length]
