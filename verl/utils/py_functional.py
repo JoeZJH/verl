@@ -184,7 +184,7 @@ def rename_dict(data: dict, prefix: str = "") -> dict:
     return new_data
 
 
-def append_to_dict(data: dict, new_data: dict, prefix: str = ""):
+def append_to_dict(data: dict, new_data: dict, prefix: str = ""): # J：按照 key 依次追加 new_data 到 data 中
     """Append values from new_data to lists in data.
 
     For each key in new_data, this function appends the corresponding value to a list
@@ -197,7 +197,7 @@ def append_to_dict(data: dict, new_data: dict, prefix: str = ""):
     Returns:
         None: The function modifies data in-place.
     """
-    for key, val in new_data.items():
+    for key, val in new_data.items(): # J：按照 key 依次追加
         new_key = f"{prefix}{key}" if not key.startswith(prefix) else key
         if new_key not in data:
             data[new_key] = val.init_list() if isinstance(val, Metric) else []

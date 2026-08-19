@@ -22,7 +22,7 @@ import numpy as np
 import torch
 
 
-def reduce_metrics(metrics: dict[str, Union["Metric", list[Any]]]) -> dict[str, Any]:
+def reduce_metrics(metrics: dict[str, Union["Metric", list[Any]]]) -> dict[str, Any]: # J：聚合所有训练指标，多次 PPO Train Step 的指标传入这里时按照训练顺序是一个 list
     """
     Reduces a dictionary of metric lists by computing the mean, max, or min of each list.
     The reduce operation is determined by the key name:
@@ -46,15 +46,15 @@ def reduce_metrics(metrics: dict[str, Union["Metric", list[Any]]]) -> dict[str, 
         >>> reduce_metrics(metrics)
         {"loss": 2.0, "accuracy": 0.8, "max_reward": 8.0, "min_error": 0.05}
     """
-    for key, val in metrics.items():
+    for key, val in metrics.items(): # J：依次轮训每个 PPO Train Step 步的结果
         if isinstance(val, Metric):
             metrics[key] = val.aggregate()
         elif "max" in key:
-            metrics[key] = np.max(val)
+            metrics[key] = np.max(val) # J：对名称里面包含 max 的值，取最大值（注意：这种类 reduce 方式有点粗暴了，万一命名本身包含了 max 呢？比如 minimax 的某个训练指标）
         elif "min" in key:
-            metrics[key] = np.min(val)
+            metrics[key] = np.min(val) # J：对名称里面包含 min 的值，取最小值（同上，容易出现问题）
         else:
-            metrics[key] = np.mean(val)
+            metrics[key] = np.mean(val) # J：默认将所有 Step 的上报结果为其均值
     return metrics
 
 

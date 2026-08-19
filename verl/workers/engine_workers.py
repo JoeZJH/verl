@@ -297,13 +297,13 @@ class TrainingWorker(Worker, DistProfilerExtension): # J: Critic 工作进程
                     update_lr_scheduler=batch_idx == total_num_iterations - 1, # J: 如果是最后一个 batch, 则更新 lr scheduler（问题：lr 的调度可能是周期性的，也可能是常数）
                     disable_auto_offload=True,
                 )
-                actor_output = self.train_batch(mini_batch_td) # J：核心函数，一次训练更新，这里面会完成 all-reduce（FSDP 实际是 reduce-scatter），实现 dp 并行的梯度同步
-                output_lst.append(actor_output)
+                actor_output = self.train_batch(mini_batch_td) # J：核心函数，一次训练更新，这里面会完成 all-reduce（FSDP 实际是 reduce-scatter），实现 dp 并行的梯度同步，返回结果中包含指标等（如 grad-norm)
+                output_lst.append(actor_output) # J：将训练结果追加起来
 
             if self.engine.is_mp_src_rank_with_outputs():
-                actor_output = [tu.get(output, "metrics") for output in output_lst]
+                actor_output = [tu.get(output, "metrics") for output in output_lst] # J：仅抽取并处理每个 PPO Train Step 的指标
                 metrics = {}
-                for output in actor_output:
+                for output in actor_output: # J：迭代每个 PPO Train Step 的训练结果（包括指标等）
                     for key, val in output.items():
                         # flattn dp and micro batch
                         if isinstance(val, list):
@@ -312,7 +312,7 @@ class TrainingWorker(Worker, DistProfilerExtension): # J: Critic 工作进程
                                 if isinstance(val[0], Metric)
                                 else list(chain.from_iterable(val))
                             )
-                    append_to_dict(metrics, output)
+                    append_to_dict(metrics, output) # J：每次训练的 metrics 累加起来，按照 key 依次追加 new_data 到 data 中
 
                 output = tu.get_tensordict(tensor_dict={}, non_tensor_dict={"metrics": metrics}).cpu()
             else:

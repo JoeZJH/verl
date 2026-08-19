@@ -1388,7 +1388,7 @@ class RayPPOTrainer:
             distillation_use_topk=distillation_use_topk,
             global_batch_size=ppo_mini_batch_size,
             mini_batch_size=ppo_mini_batch_size,
-            epochs=ppo_epochs,
+            epochs=ppo_epochs, # J：将 ppo_epochs 配置添加到数据的 epochs 中，后续根据这个来判断 ppo_epochs 训练轮数
             seed=seed,
             dataloader_kwargs={"shuffle": shuffle},
             compute_loss=True,
@@ -1737,7 +1737,7 @@ class RayPPOTrainer:
                     if self.use_critic:
                         with marked_timer("update_critic", timing_raw, color="pink"):
                             critic_output = self._update_critic(batch) # J：更新 Critic 网络
-                        critic_output_metrics = reduce_metrics(critic_output.meta_info["metrics"])
+                        critic_output_metrics = reduce_metrics(critic_output.meta_info["metrics"]) # J：将可能为多个值的（每个 Train Step 都有一个值）对象合并为单个值，按类型和名称聚合
                         metrics.update(critic_output_metrics) # J：将 Critic 网络的指标合并到 metrics 中
 
                     # implement critic warmup
@@ -1778,7 +1778,7 @@ class RayPPOTrainer:
                         with marked_timer("update_weights", timing_raw, color="red"):
                             self.checkpoint_manager.update_weights(self.global_steps) # J：更新 Actor 网络的权重到 rollout replicas
 
-                        actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
+                        actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"]) # J：将可能为多个值的（每个 PPO Train Step 都有一个值）对象合并为单个值，按类型和名称聚合
                         metrics.update(actor_output_metrics) # J：将 Actor 更新相关的指标合并到 metrics 中
 
                     # Log rollout generations if enabled
