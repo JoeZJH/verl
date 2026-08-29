@@ -76,7 +76,7 @@ def prepare_micro_batches( # J: use_dynamic_bsz 在这里用于动态平衡 batc
         assert "max_token_len_per_gpu" in data.keys(), "max_token_len_per_gpu must be set when use_dynamic_bsz is True"
         max_token_len_per_gpu = data["max_token_len_per_gpu"]
         max_token_len = max_token_len_per_gpu * sp_size
-        micro_batches, batch_idx_list = rearrange_micro_batches(
+        micro_batches, batch_idx_list = rearrange_micro_batches( # J：这里 micro_batches 的数量是动态的，但每个 micro_batches 内部的 有效 Token 总数(attention_mask 总和)不会超过 max_token_len
             data,
             max_token_len=max_token_len,
             dp_group=dp_group,

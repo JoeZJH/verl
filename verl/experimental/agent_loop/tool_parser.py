@@ -89,7 +89,7 @@ class ToolParser(ABC): # J：定义工具 Parser 基类
         return decorator
 
 
-@ToolParser.register("hermes")
+@ToolParser.register("hermes") # J：Hermes 的 ToolParser 实现
 class HermesToolParser(ToolParser): # J：定义 Hermes Tool Parser，继承 ToolParser 基类
     """Adapted from https://github.com/vllm-project/vllm/blob/v0.9.1/vllm/entrypoints/openai/tool_parsers/hermes_tool_parser.py"""
 
@@ -111,7 +111,7 @@ class HermesToolParser(ToolParser): # J：定义 Hermes Tool Parser，继承 Too
 
         matches = self.tool_call_regex.findall(text) # J：使用正则表达式提取所有匹配的工具调用
         function_calls = [] # J：初始化一个空列表，用于存储提取到的工具调用
-        for match in matches: # J：遍历所有匹配的工具调用
+        for match in matches: # J：遍历所有匹配的工具调用, 注意可以一次调用多个工具
             try:
                 function_call = json.loads(match) # J：解析 JSON 字符串为函数调用
                 name, arguments = function_call["name"], function_call["arguments"] # J：提取函数调用的名称和参数

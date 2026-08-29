@@ -232,7 +232,7 @@ class ToolAgentLoop(AgentLoopBase): # J：定义工具 Agent 循环
             sampling_params = {**sampling_params, "stop_token_ids": stop_token_ids}
 
         with simple_timer("generate_sequences", agent_data.metrics): # J：记录生成 response_ids 的时间，还会包含 num_preempted 等指标
-            output: TokenOutput = await self.server_manager.generate(
+            output: TokenOutput = await self.server_manager.generate( # J：调用模型生成 response_ids,
                 request_id=agent_data.request_id,
                 prompt_ids=agent_data.prompt_ids,
                 sampling_params=sampling_params,
@@ -294,7 +294,7 @@ class ToolAgentLoop(AgentLoopBase): # J：定义工具 Agent 循环
 
         tasks = []
         tool_call_names = []
-        for tool_call in agent_data.tool_calls[: self.max_parallel_calls]: # J：遍历工具调用列表，最多执行 max_parallel_calls 个工具调用，超过的似乎就丢掉了
+        for tool_call in agent_data.tool_calls[: self.max_parallel_calls]: # J：遍历工具调用列表，最多执行 max_parallel_calls 个工具调用，超过的似乎就丢掉了（是需要丢弃，不然并发量可能非常大，这种一般是模型输出异常或解析异常了）
             tasks.append(self._call_tool(tool_call, agent_data.tools_kwargs, agent_data)) # J：启动工具调用任务，将任务添加到任务列表中，实现并行调用
             tool_call_names.append(tool_call.name) # J：将工具调用名称添加到 tool_call_names 中
 
@@ -325,7 +325,7 @@ class ToolAgentLoop(AgentLoopBase): # J：定义工具 Agent 循环
                 # Text-only content
                 message = {"role": "tool", "content": tool_response.text or ""}
 
-            add_messages.append(message) # J：将工具响应消息添加到 add_messages 中
+            add_messages.append(message) # J：将工具响应消息添加到 add_messages 中，每个工具都有一个自己的 message 返回
 
             # Handle image data
             if tool_response.image:
@@ -372,7 +372,7 @@ class ToolAgentLoop(AgentLoopBase): # J：定义工具 Agent 循环
                     content = "".join([item.get("text", "") for item in content if item.get("type") == "text"])
                 parts.append(f'<|tool_response>response:{name}{{value:<|"|>{content}<|"|>}}<tool_response|>')
             tool_response_text = "".join(parts)
-            response_ids = await self.loop.run_in_executor(
+            response_ids = await self.loop.run_in_executor( # J：针对 add_messages 进行 apply_chat_template，注意这里仅针对 Tool Response 部分
                 None, lambda: self.tokenizer.encode(tool_response_text, add_special_tokens=False)
             )
         else: # J: 处理通用的 工具格式
@@ -380,7 +380,7 @@ class ToolAgentLoop(AgentLoopBase): # J：定义工具 Agent 循环
             # to stay compatible with downstream image processing logic!
             images = new_images_this_turn if new_images_this_turn else None
             videos = None
-            response_ids = await self.apply_chat_template( # J：针对 add_messages 进行 apply_chat_template
+            response_ids = await self.apply_chat_template( # J：针对 add_messages 进行 apply_chat_template，注意这里仅针对 Tool Response 部分
                 add_messages,
                 images=images,
                 videos=videos,
@@ -399,6 +399,7 @@ class ToolAgentLoop(AgentLoopBase): # J：定义工具 Agent 循环
             for img in new_images_this_turn:
                 agent_data.image_data.append(img)
 
+        # J：注意这里是在上面先完成 tool response 部分的 apply_chat_template 和 encode，然后再添加到原来的 prompt_ids 上，省时间 且 可以防止边界 Token 粘黏问题
         agent_data.prompt_ids += response_ids # J: 将当前轮次的 token_ids 添加添加到 agent_data.prompt_ids 中（prompt_ids 包含所有轮的 token_ids，是记录轨迹的核心字段）
         agent_data.response_mask += [0] * len(response_ids) # J：工具调用的结果都不是模型生成的
         if agent_data.response_logprobs:
@@ -450,16 +451,16 @@ class ToolAgentLoop(AgentLoopBase): # J：定义工具 Agent 循环
                 # BaseTool subclass
                 kwargs = tools_kwargs.get(tool_name, {})
                 instance_id, _ = await tool.create(create_kwargs=kwargs.get("create_kwargs", {})) # J：创建工具实例
-                tool_execution_response, tool_reward, res = await tool.execute( # J：执行工具调用返回结果
+                tool_execution_response, tool_reward, res = await tool.execute( # J：执行工具调用返回结果，可以实现为调用沙箱等（tool 可以是（可插拔的）自定义的类）
                     instance_id, tool_args, agent_data=agent_data
                 )
         except Exception as e:
             logger.warning(f"Error executing tool '{tool_name}': {e}")
-            return ToolResponse(text=f"Error executing tool '{tool_name}': {e}"), 0.0, {}
+            return ToolResponse(text=f"Error executing tool '{tool_name}': {e}"), 0.0, {} # J：兜底返回错误信息
         finally:
             # Only BaseTool instances need release (function tools never set instance_id).
             if tool and instance_id and not isinstance(tool, FunctionTool):
-                await tool.release(instance_id)
+                await tool.release(instance_id) # J：release 工具
 
         tool_response_text = tool_execution_response.text
         if tool_response_text and len(tool_response_text) > self.max_tool_response_length: # J：如果 tool_response_text 超过最大长度

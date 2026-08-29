@@ -500,7 +500,7 @@ class AgentLoopWorker: # J：一般被注册为远程 Actor，用于并行处理
             top_p=config.top_p,
             top_k=config.top_k,
             repetition_penalty=1.0,
-            logprobs=config.calculate_log_probs, # J：是否计算 log 概率，Bool 类型
+            logprobs=config.calculate_log_probs, # J：是否计算 log 概率，Bool 类型，一般是训练时需要，评估时候不需要
         )
 
         def apply_greedy_sampling_params(params: dict[str, Any]) -> None: # J：应用贪心采样参数, 即 top_p=1.0, top_k=-1, temperature=0
@@ -524,7 +524,7 @@ class AgentLoopWorker: # J：一般被注册为远程 Actor，用于并行处理
         else:
             index = np.arange(len(batch)) # J：默认的 index 从 0 开始，步长为 1，范围为 batch 大小
 
-        max_samples_per_worker = RolloutTraceConfig.get_instance().max_samples_per_step_per_worker # J：每个 worker 最大采样的样本数
+        max_samples_per_worker = RolloutTraceConfig.get_instance().max_samples_per_step_per_worker # J：每个 worker 最大 Trace 的样本数，一般都会设置为 null
 
         # For n rollouts per sample, we trace all n rollouts for selected samples
         # Note: This sampling happens per-worker, so total traces = max_samples_per_worker * num_workers * n
@@ -549,7 +549,7 @@ class AgentLoopWorker: # J：一般被注册为远程 Actor，用于并行处理
         per_sample_do_sample = batch.non_tensor_batch.get("__do_sample__")
         tasks = []
         for i in range(len(batch)):
-            trace_this_sample = i in traced_indices
+            trace_this_sample = i in traced_indices # J：如果样本没有被 trace，则这里 trace_this_sample = False
             kwargs = {k: v[i] for k, v in batch.non_tensor_batch.items() if k != "__do_sample__"}
             sample_sampling_params = dict(sampling_params)
             # J: 特别注意，不存在 __do_sample__ 时，不使用贪心采样参数，这里仅仅是用于 REMAX combined rollout 中，通过 __do_sample__ 存在且为 False 来识别 baseline 样本
@@ -573,7 +573,7 @@ class AgentLoopWorker: # J：一般被注册为远程 Actor，用于并行处理
         trajectory: dict[str, Any],
         *, # J：* 前面的参数可以按照位置传递，但 * 后面的参数必须是关键字参数
         agent_name: str,
-        trace: bool = True,
+        trace: bool = True, # J：标记样本是否被 trace
         **kwargs,
     ) -> _InternalAgentLoopOutput: # J：返回一个 _InternalAgentLoopOutput 对象
         with rollout_trace_attr( # J: 追踪 rollout 的属性
@@ -592,7 +592,7 @@ class AgentLoopWorker: # J：一般被注册为远程 Actor，用于并行处理
             agent_loop = hydra.utils.instantiate( # J: 实例化 agent_loop 类
                 config=agent_loop_config,
                 trainer_config=DictConfigWrap(config=self.config),
-                server_manager=self.llm_client,
+                server_manager=self.llm_client, # J：LLMServerManager 类对象
                 tokenizer=self.tokenizer,
                 processor=self.processor,
                 dataset_cls=self.dataset_cls,
@@ -602,7 +602,7 @@ class AgentLoopWorker: # J：一般被注册为远程 Actor，用于并行处理
             output: AgentLoopOutput = await agent_loop.run(sampling_params, **kwargs) # J：运行 agent_loop
             return await self._agent_loop_postprocess(output, trajectory["validate"], **kwargs) # J：对 agent_loop 的输出进行后处理
 
-    def _pad_token_ids(
+    def _pad_token_ids( # J：填充 Token ID 到固定长度，可以左填充或右填充，同时可选返回 Attention Mask 等信息
         self,
         tokens: list[int],
         *,
@@ -625,9 +625,10 @@ class AgentLoopWorker: # J：一般被注册为远程 Actor，用于并行处理
                 padded["attention_mask"] = padded["attention_mask"].unsqueeze(0)
         return padded
 
+    # J：核心工作：把单个 agent loop 输出的 AgentLoopOutput （未对齐、未填充的完整对话轨迹）转换成 RL 训练框架所需的、固定长度、已填充好的内部数据结构 _InternalAgentLoopOutput ，同时完成 奖励计算 和 教师 logprob 计算 （teacher-forcing 蒸馏用）
     async def _agent_loop_postprocess(self, output, validate, **kwargs) -> _InternalAgentLoopOutput: # J：对 agent_loop 的输出进行后处理
         """Perform post-processing operations on the output of each individual agent loop."""
-        output.extra_fields["raw_prompt"] = kwargs["raw_prompt"]
+        output.extra_fields["raw_prompt"] = kwargs["raw_prompt"] # J：保留原始 Prompt（记录下来）
 
         # Some AgentLoop may have already computed the reward score, e.g SWE-agent.
 
@@ -650,21 +651,22 @@ class AgentLoopWorker: # J：一般被注册为远程 Actor，用于并行处理
         #   e.g., [0,0,0,0,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,0,0,0,0]
 
         # TODO(wuxibin): remove padding and use tensordict.
-        prompt_output = self._pad_token_ids(
+        prompt_output = self._pad_token_ids( # J：左填充 到 prompt_length
             output.prompt_ids,
             max_length=self.rollout_config.prompt_length,
             padding_side="left",
             return_attention_mask=True,
         )
 
-        response_output = self._pad_token_ids(
+        response_output = self._pad_token_ids( # J：右填充 到 response_length
             output.response_ids,
             max_length=self.rollout_config.response_length,
             padding_side="right",
             return_attention_mask=True,
         )
 
-        response_mask_output = self._pad_token_ids(
+        # J：理解：response_mask 被 tokenizer 当作普通 token id 填充，pad 值可能非零，保险起见，后面需要用 attention_mask 来校正 padding 位置
+        response_mask_output = self._pad_token_ids( # J：右填充 到 response_length
             output.response_mask,
             max_length=self.rollout_config.response_length,
             padding_side="right",
@@ -672,17 +674,17 @@ class AgentLoopWorker: # J：一般被注册为远程 Actor，用于并行处理
         )
 
         response_logprobs = None
-        if output.response_logprobs is not None:
+        if output.response_logprobs is not None: # J：如果 output 中包含 response_logprobs，则填充 response_logprobs 到 response_length
             pad_size = self.rollout_config.response_length - len(output.response_logprobs)
             response_logprobs = torch.tensor(output.response_logprobs + [0.0] * pad_size).unsqueeze(0)
 
-        response_mask = response_mask_output["input_ids"] * response_output["attention_mask"]
-        attention_mask = torch.cat([prompt_output["attention_mask"], response_output["attention_mask"]], dim=1)
-        input_ids = torch.cat([prompt_output["input_ids"], response_output["input_ids"]], dim=1)
+        # J：response_mask 被 tokenizer 当作普通 token id 填充，pad 值可能非零，需要用 attention_mask 来校正 padding 位置
+        response_mask = response_mask_output["input_ids"] * response_output["attention_mask"] # J：相当于仅保留 Attention 有效且仅 Response 的 Token
+        attention_mask = torch.cat([prompt_output["attention_mask"], response_output["attention_mask"]], dim=1) # J：合并 prompt_attention_mask 和 response_attention_mask，赋值为 attention_mask
+        input_ids = torch.cat([prompt_output["input_ids"], response_output["input_ids"]], dim=1) # J：合并 prompt_ids 和 response_ids，赋值为 input_ids
 
-        # J：TOOD，继续阅读
         routed_experts = None
-        if output.routed_experts is not None: # J：如果 output 中包含 routed_experts
+        if output.routed_experts is not None: # J：如果 output 中包含 routed_experts（这个字段记录了 MoE 模型中路由到的专家）
             total_length = input_ids.shape[1]
             length, layer_num, topk_num = output.routed_experts.shape
             if isinstance(output.routed_experts, np.ndarray): # J：如果 routed_experts 是 numpy 数组
@@ -709,7 +711,7 @@ class AgentLoopWorker: # J：一般被注册为远程 Actor，用于并行处理
             routed_experts[:, start_pos:end_pos] = experts_tensor.unsqueeze(0)
 
         multi_modal_inputs = self._compute_multi_modal_inputs(output, input_ids)
-        position_ids = self._compute_position_ids(
+        position_ids = self._compute_position_ids( # J：这个函数计算 position_ids，可以同时处理多模态和纯文本，纯文本时用 mask 直接累加 mask=1 的位置即可；多模态时用 processor 的 get_rope_index 生成 vision 位置，再和 text 位置拼接成人/视觉位置序列
             input_ids,
             attention_mask,
             multi_modal_inputs,
@@ -719,8 +721,8 @@ class AgentLoopWorker: # J：一般被注册为远程 Actor，用于并行处理
                 output.multi_modal_data.get("audios") if output.multi_modal_data else None
             ),
         )
-        await self._compute_score([output], kwargs=kwargs)
-        await self._compute_teacher_logprobs(
+        await self._compute_score([output], kwargs=kwargs) # J：异步奖励计算
+        await self._compute_teacher_logprobs( # J：异步教师日志概率计算
             output,
             prompt_ids=output.prompt_ids,
             response_ids=output.response_ids,
@@ -765,7 +767,7 @@ class AgentLoopWorker: # J：一般被注册为远程 Actor，用于并行处理
             extra_fields=output.extra_fields,
         )
 
-    def _compute_multi_modal_inputs(self, output, input_ids) -> dict[str, torch.Tensor]:
+    def _compute_multi_modal_inputs(self, output, input_ids) -> dict[str, torch.Tensor]: # 把图像/视频/音频通过 processor 转成多模态输入，并计算 images_seqlens
         """Compute multi-modal inputs with image, video and audio."""
         multi_modal_inputs = {}
         if self.processor is None:
@@ -799,7 +801,7 @@ class AgentLoopWorker: # J：一般被注册为远程 Actor，用于并行处理
             multi_modal_inputs["images_seqlens"] = images_seqlens
         return multi_modal_inputs
 
-    def _compute_position_ids(
+    def _compute_position_ids( # J：计算 position_ids, 纯文本时直接累加 mask=1 的位置即可，多模态时用 processor 的 get_rope_index 生成 vision 位置，再和 text 位置拼接成人/视觉位置序列
         self,
         input_ids,
         attention_mask,
@@ -807,7 +809,7 @@ class AgentLoopWorker: # J：一般被注册为远程 Actor，用于并行处理
         mm_processor_kwargs: Optional[dict[str, Any]] = None,
     ) -> torch.Tensor:
         """Compute position ids for multi-modal inputs."""
-        if self.processor is None:
+        if self.processor is None: # J：纯文本时很好处理，直接累加 mask=1 的位置即可
             return compute_position_id_with_mask(attention_mask)  # (1, seq_len)
 
         multi_modal_kwargs = {

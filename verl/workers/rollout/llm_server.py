@@ -256,14 +256,14 @@ class LLMServerManager:
 
     @classmethod
     @auto_await
-    async def create(cls, *args, **kwargs):
+    async def create(cls, *args, **kwargs): # J: 构造 LLMServerManager 实例对象
         """Create the LLMServerManager."""
         instance = cls(*args, **kwargs)
         await instance._initialize_llm_servers()
         await instance._init_global_load_balancer()
         return instance
 
-    async def _initialize_llm_servers(self, start_rank: int = 0):
+    async def _initialize_llm_servers(self, start_rank: int = 0): # J：初始化服务
         """Initialize the LLM server replicas.
 
         Args:

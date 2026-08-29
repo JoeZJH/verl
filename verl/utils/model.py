@@ -237,8 +237,8 @@ def create_random_mask(
     return masks
 
 
-def compute_position_id_with_mask(mask):
-    return torch.clip(torch.cumsum(mask, dim=-1) - 1, min=0, max=None)
+def compute_position_id_with_mask(mask): # J：根据 mask 计算 position_ids
+    return torch.clip(torch.cumsum(mask, dim=-1) - 1, min=0, max=None) # J：累加 mask=1 的位置即可得到 position_ids，从 0 开始
 
 
 def convert_weight_keys(state_dict: dict[str, torch.Tensor], model: PreTrainedModel):

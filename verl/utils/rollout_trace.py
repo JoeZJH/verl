@@ -130,7 +130,8 @@ class RolloutTraceConfig: # J：RolloutTraceConfig 类用于配置 rollout trace
 
 
 @contextlib.contextmanager
-def rollout_trace_attr( # J: 追踪 rollout 的属性
+def rollout_trace_attr( # J: 追踪 rollout 的属性，在训练过程中，为某个 rollout 追踪操作（rollout 采样）注入元数据属性 ，用于链路追踪/日志记录
+                        # J: 在追踪系统（weave/mlflow）中能按"哪个样本、哪一步、第几次 rollout"来归类和分析 rollout 调用
     sample_index=None, step=None, rollout_n=None, name="rollout_trace", validate=False, trace: bool = True
 ):
     """A context manager to add attributes to a trace for the configured backend.
@@ -145,7 +146,7 @@ def rollout_trace_attr( # J: 追踪 rollout 的属性
     """
     backend = RolloutTraceConfig.get_backend()
 
-    should_skip = backend is not None and not trace
+    should_skip = backend is not None and not trace # J：如果 backend 不为空且 trace 是 True，才 trace，否则不执行 trace；执行 trace 时，会将各种信息绑定到上下文上？
 
     if should_skip:
         token = _trace_enabled.set(False)

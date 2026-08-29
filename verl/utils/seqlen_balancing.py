@@ -345,7 +345,7 @@ def roundup_divisible(a: int, b: int) -> int:
     return ((a + b - 1) // b) * b
 
 
-def rearrange_micro_batches( # J：结合 use_dynamic_bsz_balance 来动态平衡 batch size，避免内存溢出
+def rearrange_micro_batches( # J：结合 use_dynamic_bsz_balance 来动态平衡 batch size（确保单个 micro-batch 中 attention_mask 之和的上限为 max_token_len），避免内存溢出
     batch,
     max_token_len,
     dp_group=None,
