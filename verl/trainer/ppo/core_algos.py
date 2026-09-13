@@ -2471,6 +2471,7 @@ def compute_policy_loss_bypass_mode( # J：调用了 compute_policy_loss_reinfor
             response_mask=effective_mask,
             loss_agg_mode=loss_agg_mode,
             config=config,
+            # J：下面这一行很重要，REINFORCE 没有 ppo_clip，需要加入 computed_is_weights 作为训推不一致的校正
             rollout_is_weights=computed_is_weights,
         )
 
@@ -2485,6 +2486,7 @@ def compute_policy_loss_bypass_mode( # J：调用了 compute_policy_loss_reinfor
             response_mask=effective_mask,
             loss_agg_mode=loss_agg_mode,
             config=config,
+            # J：下面这一行是核心，保证即使 computed_is_weights 在之前有值（有时会为了上报指标而打开 rollout_is），也不影响 Loss 计算
             rollout_is_weights=None,  # Explicitly None - no IS weights for PPO-clip
         )
 

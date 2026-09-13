@@ -547,7 +547,7 @@ class SGLangHttpServer:
             return decode_output
 
         # TODO(@wuxibin): switch to `/generate` http endpoint once multi-modal support ready.
-        max_possible_tokens = self.config.max_model_len - len(prompt_ids) - 1
+        max_possible_tokens = self.config.max_model_len - len(prompt_ids) - 1 # J：模型长度也进行限定
 
         if max_possible_tokens < 0:
             raise ValueError(
@@ -563,6 +563,8 @@ class SGLangHttpServer:
         else:
             # Cap max_tokens by response_length to ensure tensor alignment,
             # and by remaining budget to prevent OOM in multi-turn rollouts.
+            # J: 当前的 max_new_tokens 是 prompt+response 总预算 - 当前 prompt+response 长度
+            # J: 这里设置的 配置方式 会导致 max_new_tokens 大于 response_length - curr_response_length，也就是说可能输出还需要截断才能保证 真实保留的 Response 总长度不大于 response_length 配置
             max_new_tokens = min(
                 self.config.response_length, self.config.prompt_length + self.config.response_length - len(prompt_ids)
             )

@@ -188,6 +188,7 @@ class ToolAgentLoop(AgentLoopBase): # J：定义工具 Agent 循环
 
         output: AgentLoopOutput = AgentLoopOutput( # J：生成 AgentLoopOutput 对象
             prompt_ids=prompt_ids, # J：原始 prompt_ids（不包含新生成的 工具调用和 模型输出 token_ids）
+            # J: 这里对 response 进行截断的原因是生成时预算是 Prompt+Response 的总预算 减去 Prompt+Response 的当前预算，当前 Response 长度可能是超过 Response 的单独预算的 详情见：verl.workers.rollout.sglang_rollout.async_sglang_server
             response_ids=response_ids[: self.response_length], # J：截取 response_ids 中前 self.response_length（最大响应长度） 个 token_ids
             response_mask=agent_data.response_mask[: self.response_length], # J：截取 response_mask 中前 self.response_length（最大响应长度） 个 token_ids，与 response_ids 对应
             multi_modal_data=multi_modal_data, # J：多模态输入数据
@@ -387,6 +388,7 @@ class ToolAgentLoop(AgentLoopBase): # J：定义工具 Agent 循环
                 remove_system_prompt=True,
             )
 
+        # J：注意，到这里的时候已经完成了工具调用内容的完整添加了，所以最终在 messages 中 Response 的总长度是可能超过 self.response_length 的（messages 不会再被 截断，但是 response_ids 是会再被截断一次的）
         if len(agent_data.response_mask) + len(response_ids) >= self.response_length: # J：如果 response_ids 超过最大长度，返回 TERMINATED 状态
             return AgentState.TERMINATED # J：返回 TERMINATED 状态
         # Update prompt_ids and response_mask

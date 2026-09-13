@@ -72,6 +72,7 @@ class SingleTurnAgentLoop(AgentLoopBase): # J：单轮对话 Agent，仅支持�
 
         output: AgentLoopOutput = AgentLoopOutput( # J：将 TokenOutput 对象转换为 AgentLoopOutput 对象
             prompt_ids=prompt_ids,
+            # J: 这里对 response 进行截断的原因是生成时预算是 Prompt+Response 的总预算 减去 Prompt+Response 的当前预算，当前 Response 长度可能是超过 Response 的单独预算的 详情见：verl.workers.rollout.sglang_rollout.async_sglang_server
             response_ids=output.token_ids[: self.response_length],
             response_mask=response_mask[: self.response_length],
             response_logprobs=output.log_probs[: self.response_length] if output.log_probs else None,
