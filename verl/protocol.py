@@ -962,7 +962,7 @@ class DataProto: # J：核心数据结构
         cls = type(data[0]) if len(data) > 0 else DataProto
         return cls(batch=new_batch, non_tensor_batch=non_tensor_batch, meta_info=merged_meta_info)
 
-    def reorder(self, indices):
+    def reorder(self, indices): # J：根据 indices 重新排序 batch 中的数据
         """
         Note that this operation is in-place
         """
